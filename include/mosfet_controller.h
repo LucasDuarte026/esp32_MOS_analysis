@@ -6,12 +6,7 @@
 #include <vector>
 #include "log_buffer.h"
 
-// Configuration Constants
-#define ADC_PIN 34
-#define DAC_VDS_PIN 25  // Example
-#define DAC_VGS_PIN 26  // Example
-#define ADC_RESOLUTION 12
-#define ADC_VREF 3.3
+// Hardware pin definitions moved to hardware_hal.h
 
 struct SweepConfig
 {

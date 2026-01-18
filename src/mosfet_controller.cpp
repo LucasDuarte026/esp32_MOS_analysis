@@ -1,4 +1,5 @@
 #include "mosfet_controller.h"
+#include "hardware_hal.h"
 #include "file_manager.h"
 #include <sys/time.h>
 #include <time.h>
@@ -26,11 +27,10 @@ void MOSFETController::begin()
         LOG_ERROR("Failed to create MOSFET mutex");
     }
     
-    analogReadResolution(ADC_RESOLUTION);
-    analogSetAttenuation(ADC_11db);
-    pinMode(ADC_PIN, INPUT);
+    // Initialize hardware abstraction layer (DACs and ADC)
+    hal::init();
     
-    LOG_INFO("MOSFET Controller initialized - ADC on GPIO%d", ADC_PIN);
+    LOG_INFO("MOSFET Controller initialized");
 }
 
 bool MOSFETController::openMeasurementFile() {
@@ -239,8 +239,8 @@ MOSFETController::ProgressStatus MOSFETController::getProgress() const
 
 float MOSFETController::readAnalogVoltage()
 {
-    int rawValue = analogRead(ADC_PIN);
-    return (rawValue / (float)(1 << ADC_RESOLUTION)) * ADC_VREF;
+    // Delegate to HAL for averaged reading
+    return hal::readShuntVoltage();
 }
 
 void MOSFETController::performSweep()
@@ -272,8 +272,11 @@ void MOSFETController::performSweep()
         // Inner loop: VGS sweep
         int point_count = 0;
         for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
-            // Target voltage (in real hardware, apply this!)
-            // dac.setVoltage(vds); dac.setVoltage(vgs);
+            // Apply target voltages via DAC
+            hal::setVDS(vds);
+            hal::setVGS(vgs);
+            
+            // Wait for settling
             vTaskDelay(pdMS_TO_TICKS(settling));
             
             // Read shunt voltage
@@ -306,6 +309,9 @@ void MOSFETController::performSweep()
         progressPercent_ = 100;
         LOG_INFO("Sweep complete. Total curves: %d", (int)results_buffer_.size());
     }
+    
+    // Shutdown DACs for safety
+    hal::shutdown();
 }
 
 void MOSFETController::calculateCurveParams(CurveData& curve) {
