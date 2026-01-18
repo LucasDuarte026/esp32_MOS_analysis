@@ -1,0 +1,5 @@
+# ESP32 Partition Table with FAT filesystem
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     ,        0x5000,
+app0,     app,  ota_0,   ,        0x180000,
+ffat,     data, fat,     ,        0x270000,

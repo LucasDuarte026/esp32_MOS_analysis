@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coleta - MOSFET Analysis</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+
+<body>
+    <!-- Main Container -->
+    <div class="app-container">
+
+        <!-- Vertical Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="8" fill="white" opacity="0.1" />
+                        <path d="M16 8L24 12V20L16 24L8 20V12L16 8Z" stroke="white" stroke-width="2" fill="none" />
+                        <circle cx="16" cy="16" r="3" fill="white" />
+                    </svg>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-btn active" title="Coleta de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18" />
+                        <path d="M18 17V9" />
+                        <path d="M13 17V5" />
+                        <path d="M8 17v-3" />
+                    </svg>
+                </a>
+
+                <a href="/visualization" class="nav-btn" title="Visualização de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" />
+                        <path d="M8 21h8" />
+                        <path d="M12 17v4" />
+                    </svg>
+                </a>
+
+                <a href="/email" class="nav-btn" title="Enviar Relatório">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+                    </svg>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-settings" id="btn-open-logs">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+
+            <!-- Data Collection Section -->
+            <section id="page-collection" class="page-content">
+                <header class="page-header">
+                    <div class="header-text">
+                        <h1>Coleta de Dados</h1>
+                        <p class="subtitle">Sweep VDS/VGS para caracterização de MOSFET</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="status-indicator" id="header-status-indicator">
+                            <span class="status-dot" id="header-status-dot"></span>
+                            <span id="header-status-text">Verificando...</span>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="content-grid">
+                    <!-- Configuration Card -->
+                    <div class="card card-large">
+                        <div class="card-header">
+                            <h2>Configurações de Medida</h2>
+                        </div>
+                        <div class="card-body">
+                            <!-- VDS Configuration Section -->
+                            <div
+                                style="margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 2px solid var(--border-color);">
+                                <h3 style="margin-bottom: var(--spacing-md); color: var(--accent-cyan);">VDS -
+                                    Configuração
+                                    VDS (Tensão Dreno-Source)</h3>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="vds-start">Tensão Inicial VDS (V)</label>
+                                        <input type="number" id="vds-start" class="input-field" min="0" max="5"
+                                            step="0.01" value="0">
+                                        <small class="helper-text">Início do sweep VDS (padrão: 0V)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="vds-end">Tensão Final VDS (V)</label>
+                                        <input type="number" id="vds-end" class="input-field" min="0" max="5"
+                                            step="0.01" value="5.0">
+                                        <small class="helper-text">Limite superior VDS (máximo: VDD)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="vds-step">Passo VDS (V)</label>
+                                        <select id="vds-step" class="select-field">
+                                            <option value="0.05" selected>0.05V (alta resolução)</option>
+                                            <option value="0.10">0.10V (balanceado)</option>
+                                            <option value="0.15">0.15V</option>
+                                            <option value="0.20">0.20V (rápido)</option>
+                                        </select>
+                                        <small class="helper-text">Incremento de tensão VDS no sweep</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- VGS Configuration Section -->
+                            <div
+                                style="margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 2px solid var(--border-color);">
+                                <h3 style="margin-bottom: var(--spacing-md); color: var(--accent-blue);">VGS -
+                                    Configuração
+                                    VGS (Tensão Porta-Source)</h3>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="vgs-start">Tensão Inicial VGS (V)</label>
+                                        <input type="number" id="vgs-start" class="input-field" min="0" max="5"
+                                            step="0.01" value="0">
+                                        <small class="helper-text">Início do sweep VGS (padrão: 0V)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="vgs-end">Tensão Final VGS (V)</label>
+                                        <input type="number" id="vgs-end" class="input-field" min="0" max="5"
+                                            step="0.01" value="3.5">
+                                        <small class="helper-text">Limite superior VGS (máximo: VDD, típico:
+                                            2.5-3.5V)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="vgs-step">Passo VGS (V)</label>
+                                        <select id="vgs-step" class="select-field">
+                                            <option value="0.01">0.01V (precisão)</option>
+                                            <option value="0.05" selected>0.05V (padrão)</option>
+                                            <option value="0.1">0.10V</option>
+                                            <option value="0.15">0.15V</option>
+                                            <option value="0.2">0.20V</option>
+                                            <option value="0.25">0.25V</option>
+                                        </select>
+                                        <small class="helper-text">Incremento de tensão VGS (recomendado: 0.05V)</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Hardware & Timing Configuration -->
+                            <div style="margin-bottom: var(--spacing-lg);">
+                                <h3 style="margin-bottom: var(--spacing-md);">Configuração de Hardware</h3>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="rshunt">Resistor Shunt (Ω)</label>
+                                        <input type="number" id="rshunt" class="input-field" min="0.1" max="1000"
+                                            step="0.1" placeholder="Ex: 100">
+                                        <small class="helper-text">Resistor na source para medição de corrente (Ids =
+                                            Vsh / R)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="settling-time">Tempo de Estabilização (ms)</label>
+                                        <input type="number" id="settling-time" class="input-field" min="1" max="1000"
+                                            step="1" value="5">
+                                        <small class="helper-text">Tempo entre escrita DAC e leitura ADC (recomendado:
+                                            5ms)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="filename">Nome do Arquivo CSV</label>
+                                        <input type="text" id="filename" class="input-field"
+                                            placeholder="mosfet_caracterizacao_2024.csv">
+                                        <small class="helper-text">Arquivo com timestamps, VDS, VGS, Vsh, Ids, Gm,
+                                            parâmetros</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button class="btn btn-secondary" id="btn-reset-fields">
+                                    Resetar Campos
+                                </button>
+                                <button class="btn btn-primary" id="btn-start-collection">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                    Iniciar Coleta
+                                </button>
+                            </div>
+
+                            <!-- Progress Indicator -->
+                            <div class="progress-section" id="progress-section" style="display: none;">
+                                <div class="progress-info">
+                                    <span id="progress-text">Coletando dados...</span>
+                                    <span id="progress-percent">100%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progress-fill"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Status Card -->
+                    <div class="card card-compact">
+                        <div class="card-header">
+                            <h3>Status do Sistema</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-row">
+                                <span class="info-label">Comunicação USB</span>
+                                <span class="info-value" id="connection-status">Verificando...</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">ID do ESP32</span>
+                                <span class="info-value" id="sensor-id"
+                                    style="font-family: monospace; font-size: 12px;">Carregando...</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Temperatura</span>
+                                <span class="info-value" id="temperature">--°C</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Memória Livre</span>
+                                <span class="info-value" id="free-heap">-- KB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Floating Logs Window -->
+    <div id="floating-logs-window" class="floating-window" style="display: none;">
+        <div class="floating-window-header" id="logs-window-header">
+            <h3>System Logs</h3>
+            <div class="floating-window-controls">
+                <button class="btn-link" id="btn-clear-logs-float">Limpar</button>
+                <button class="floating-window-close" id="btn-close-logs">×</button>
+            </div>
+        </div>
+        <div class="floating-window-body">
+            <div class="logs-container" id="logs-container"></div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="dashboard.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualização - MOSFET Analysis</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+
+<body>
+    <!-- Main Container -->
+    <div class="app-container">
+
+        <!-- Vertical Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="8" fill="white" opacity="0.1" />
+                        <path d="M16 8L24 12V20L16 24L8 20V12L16 8Z" stroke="white" stroke-width="2" fill="none" />
+                        <circle cx="16" cy="16" r="3" fill="white" />
+                    </svg>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-btn" title="Coleta de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18" />
+                        <path d="M18 17V9" />
+                        <path d="M13 17V5" />
+                        <path d="M8 17v-3" />
+                    </svg>
+                </a>
+
+                <a href="/visualization" class="nav-btn active" title="Visualização de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" />
+                        <path d="M8 21h8" />
+                        <path d="M12 17v4" />
+                    </svg>
+                </a>
+
+                <a href="/email" class="nav-btn" title="Enviar Relatório">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+                    </svg>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-settings" id="btn-open-logs">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+
+            <!-- Data Visualization Section -->
+            <section id="page-visualization" class="page-content">
+                <header class="page-header">
+                    <div class="header-text">
+                        <h1>Visualização de Dados</h1>
+                        <p class="subtitle">Análise interativa de curvas MOSFET</p>
+                    </div>
+                </header>
+
+                <!-- File Selector Card - Reorganized -->
+                <div class="card" style="margin-bottom: var(--spacing-lg);">
+                    <div class="card-body">
+                        <!-- Row 1: File Select + Download Button -->
+                        <div style="display: flex; gap: 16px; align-items: flex-end; margin-bottom: 16px;">
+                            <div class="form-group" style="flex: 2;">
+                                <label for="file-select">Selecionar Medida</label>
+                                <select id="file-select" class="select-field">
+                                    <option value="">-- Selecione uma medida --</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-secondary" id="btn-download-measurement" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                                </svg>
+                                Download CSV
+                            </button>
+                        </div>
+
+                        <!-- Row 2: VDS Selector -->
+                        <div class="form-group">
+                            <label for="vds-select">Selecionar Curva VDS</label>
+                            <select id="vds-select" class="select-field" disabled>
+                                <option value="">Aguardando arquivo...</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Plot and Controls Layout - Plot on left (larger), controls on right -->
+                <div class="viz-layout" style="display: flex; gap: 16px;">
+                    <!-- Main Plot Card - Takes most of the space -->
+                    <div class="card viz-plot-card" style="flex: 3; min-width: 0;">
+                        <div class="card-header">
+                            <h2>Curvas Características MOSFET</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="plot-container" class="plot-area" style="min-height: 500px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Toggle Controls Sidebar - Compact on right -->
+                    <div class="card viz-controls-card" style="flex: 2; min-width: 220px; max-width: 280px;">
+                        <div class="card-header">
+                            <h3>Curvas Visíveis</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="toggle-group">
+                                <button class="toggle-btn active" id="toggle-ids" data-curve="ids">
+                                    <span class="toggle-indicator" style="background: #2196F3;"></span>
+                                    <span class="toggle-label">IDs (Corrente)</span>
+                                </button>
+                                <button class="toggle-btn" id="toggle-gm" data-curve="gm">
+                                    <span class="toggle-indicator" style="background: #FF9800;"></span>
+                                    <span class="toggle-label">Gm (Transcondutância)</span>
+                                </button>
+                                <button class="toggle-btn" id="toggle-ss" data-curve="ss">
+                                    <span class="toggle-indicator" style="background: #F44336;"></span>
+                                    <span class="toggle-label">SS (Subthreshold)</span>
+                                </button>
+                                <button class="toggle-btn" id="toggle-vt" data-curve="vt">
+                                    <span class="toggle-indicator" style="background: #4CAF50;"></span>
+                                    <span class="toggle-label">Vt (Limiar)</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics Cards -->
+                <div class="metrics-grid">
+                    <div class="card card-metric">
+                        <div class="metric-icon" style="background: rgba(33, 150, 243, 0.1);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2196F3"
+                                stroke-width="2">
+                                <path d="M3 12h18M3 6h18M3 18h18" />
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <h4>Threshold Voltage</h4>
+                            <div class="metric-value" id="metric-vt">--</div>
+                            <small class="metric-label">Tensão de Limiar</small>
+                        </div>
+                    </div>
+
+                    <div class="card card-metric">
+                        <div class="metric-icon" style="background: rgba(255, 152, 0, 0.1);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FF9800"
+                                stroke-width="2">
+                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <h4>Max Transconductance</h4>
+                            <div class="metric-value" id="metric-gm">--</div>
+                            <small class="metric-label">Pico de Gm</small>
+                        </div>
+                    </div>
+
+                    <div class="card card-metric">
+                        <div class="metric-icon" style="background: rgba(244, 67, 54, 0.1);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F44336"
+                                stroke-width="2">
+                                <path d="M18 20V10M12 20V4M6 20v-6" />
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <h4>Subthreshold Swing</h4>
+                            <div class="metric-value" id="metric-ss">--</div>
+                            <small class="metric-label">Inclinação SS</small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Floating Logs Window -->
+    <div id="floating-logs-window" class="floating-window" style="display: none;">
+        <div class="floating-window-header" id="logs-window-header">
+            <h3>System Logs</h3>
+            <div class="floating-window-controls">
+                <button class="btn-link" id="btn-clear-logs-float">Limpar</button>
+                <button class="floating-window-close" id="btn-close-logs">×</button>
+            </div>
+        </div>
+        <div class="floating-window-body">
+            <div class="logs-container" id="logs-container"></div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="dashboard.js"></script>
+</body>
+
+</html>

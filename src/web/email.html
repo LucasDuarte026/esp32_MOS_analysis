@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email - MOSFET Analysis</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+
+<body>
+    <!-- Main Container -->
+    <div class="app-container">
+
+        <!-- Vertical Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="8" fill="white" opacity="0.1" />
+                        <path d="M16 8L24 12V20L16 24L8 20V12L16 8Z" stroke="white" stroke-width="2" fill="none" />
+                        <circle cx="16" cy="16" r="3" fill="white" />
+                    </svg>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-btn" title="Coleta de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18" />
+                        <path d="M18 17V9" />
+                        <path d="M13 17V5" />
+                        <path d="M8 17v-3" />
+                    </svg>
+                </a>
+
+                <a href="/visualization" class="nav-btn" title="Visualização de Dados">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" />
+                        <path d="M8 21h8" />
+                        <path d="M12 17v4" />
+                    </svg>
+                </a>
+
+                <a href="/email" class="nav-btn active" title="Enviar Relatório">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+                    </svg>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-settings" id="btn-open-logs">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+
+            <!-- Email Sending Section -->
+            <section id="page-email" class="page-content">
+                <header class="page-header">
+                    <div class="header-text">
+                        <h1>Enviar Relatório</h1>
+                        <p class="subtitle">Compartilhe dados e análises por email</p>
+                    </div>
+                </header>
+
+                <div class="content-grid">
+                    <!-- Email Form Card -->
+                    <div class="card card-large">
+                        <div class="card-header">
+                            <h2>Compor Email</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="email-form">
+                                <div class="form-group">
+                                    <label for="email-recipients">Email do Destinatário</label>
+                                    <input type="email" id="email-recipients" class="input-field"
+                                        placeholder="email@exemplo.com" required>
+                                    <small class="helper-text">Separe múltiplos emails com vírgula</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="email-subject">Assunto</label>
+                                    <input type="text" id="email-subject" class="input-field"
+                                        placeholder="Relatório de Análise MOSFET">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="email-message">Mensagem</label>
+                                    <textarea id="email-message" class="textarea-field" rows="5"
+                                        placeholder="Digite sua mensagem aqui..."></textarea>
+                                    <small class="helper-text"><span id="char-count">0</span> / 1000 caracteres</small>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="email-format">Formato do Arquivo</label>
+                                        <select id="email-format" class="select-field">
+                                            <option value="csv">CSV (Excel)</option>
+                                            <option value="json">JSON (Dados brutos)</option>
+                                            <option value="pdf">PDF (Relatório completo)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="email-measurement">Medida</label>
+                                        <select id="email-measurement" class="select-field">
+                                            <option value="">-- Selecione --</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="include-plots" checked>
+                                        <span>Incluir gráficos (PNG)</span>
+                                    </label>
+                                </div>
+
+                                <div class="form-actions">
+                                    <button type="button" class="btn btn-secondary">Salvar Rascunho</button>
+                                    <button type="submit" class="btn btn-primary" id="btn-send-email">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                                        </svg>
+                                        Enviar Relatório
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Sent Reports Card -->
+                    <div class="card card-compact">
+                        <div class="card-header">
+                            <h3>Relatórios Enviados</h3>
+                            <button class="btn-link">Ver Todos</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="reports-list" id="reports-list">
+                                <div class="report-item">
+                                    <div class="report-info">
+                                        <strong>Relatório para joao@lab.com</strong>
+                                        <small>Hoje 16:36</small>
+                                    </div>
+                                    <span class="badge badge-success">Enviado</span>
+                                </div>
+                                <div class="report-item">
+                                    <div class="report-info">
+                                        <strong>Dados NMOS L=1.5μm</strong>
+                                        <small>Hoje 14:22</small>
+                                    </div>
+                                    <span class="badge badge-success">Enviado</span>
+                                </div>
+                                <div class="report-item">
+                                    <div class="report-info">
+                                        <strong>Análise completa Set 3</strong>
+                                        <small>Ontem 18:45</small>
+                                    </div>
+                                    <span class="badge badge-success">Enviado</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Floating Logs Window -->
+    <div id="floating-logs-window" class="floating-window" style="display: none;">
+        <div class="floating-window-header" id="logs-window-header">
+            <h3>System Logs</h3>
+            <div class="floating-window-controls">
+                <button class="btn-link" id="btn-clear-logs-float">Limpar</button>
+                <button class="floating-window-close" id="btn-close-logs">×</button>
+            </div>
+        </div>
+        <div class="floating-window-body">
+            <div class="logs-container" id="logs-container"></div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="dashboard.js"></script>
+</body>
+
+</html>
