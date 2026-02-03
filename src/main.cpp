@@ -12,6 +12,7 @@
 #include "mosfet_controller.h"
 #include "monitoring_task.h"
 #include "log_buffer.h"
+#include "led_status.h"
 
 #include "file_manager.h"
 #include <FFat.h>
@@ -238,7 +239,8 @@ void handleSystemInfo()
   json += "\"version\":\"" + String(SOFTWARE_VERSION) + "\",";
   json += "\"temperature\":" + String(status.temperature_celsius, 1) + ",";
   json += "\"usb_connected\":" + String(status.usb_connected ? "true" : "false") + ",";
-  json += "\"free_heap\":" + String(status.free_heap);
+  json += "\"free_heap\":" + String(status.free_heap) + ",";
+  json += "\"debug_mode\":" + String(isDebugModeEnabled() ? "true" : "false");
   json += "}";
   server.send(200, "application/json", json);
 }
@@ -413,6 +415,9 @@ void connectToWifi()
   WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  // Set LED to WiFi disconnected pattern during connection attempt
+  led_status::setState(led_status::State::WIFI_DISCONNECTED);
+
   const uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -431,6 +436,9 @@ void connectToWifi()
   }
 
   digitalWrite(LED_PIN, HIGH);
+  // WiFi connected - set LED to standby
+  led_status::setState(led_status::State::STANDBY);
+  
   LOG_INFO("WiFi connected!");
   LOG_INFO("IP Address: %s", WiFi.localIP().toString().c_str());
   LOG_INFO("Hostname: %s.local", WIFI_HOSTNAME);
@@ -461,6 +469,7 @@ void setup()
   Serial.begin(115200);
   delay(100);
   initAsyncLogging(); // Initialize Async Serial Task
+  initDebugModePin(); // Initialize GPIO12 for debug mode control
   
   // Initialize file system
   if (!FileManager::init()) {
@@ -489,6 +498,9 @@ void setup()
   // Inicializar sistema de monitoramento
   monitoring::begin();
   LOG_INFO("Monitoring system started");
+  
+  // Inicializar sistema de LED externo (GPIO14)
+  led_status::init();
 
   // Configurar rotas do servidor web
   LOG_INFO("Configuring web server routes");
@@ -532,7 +544,8 @@ void setup()
   Serial.println("  - Por IP: http://" + WiFi.localIP().toString() + "/");
   Serial.printf("  - Por hostname: http://%s.local/\n", WIFI_HOSTNAME);
 
-  xTaskCreatePinnedToCore(ledTask, "LedTask", 2048, nullptr, 1, nullptr, tskNO_AFFINITY);
+  // Note: ledTask replaced by led_status module (GPIO14 external LED)
+  // The old on-board LED (GPIO2) is still toggled for backward compatibility
   xTaskCreatePinnedToCore(webServerTask, "WebServerTask", 8192, nullptr, 2, nullptr, tskNO_AFFINITY);
 }
 

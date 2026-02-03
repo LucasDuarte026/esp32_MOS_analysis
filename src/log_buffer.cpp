@@ -3,6 +3,54 @@
 // Global instance
 LogBuffer g_log_buffer;
 
+// ============================================================================
+// Debug Mode via GPIO12
+// ============================================================================
+static bool g_debug_mode_initialized = false;
+static bool g_debug_mode_cached = false;
+static unsigned long g_debug_last_check = 0;
+
+void initDebugModePin() {
+    pinMode(DEBUG_MODE_PIN, INPUT_PULLUP);
+    g_debug_mode_initialized = true;
+    
+    // Initial read - debug enabled when pin is LOW (connected to GND)
+    g_debug_mode_cached = (digitalRead(DEBUG_MODE_PIN) == LOW);
+    
+    if (g_debug_mode_cached) {
+        Serial.println("[SYSTEM] Debug mode ENABLED via GPIO12 (pulled LOW)");
+    } else {
+        Serial.println("[SYSTEM] Debug mode OFF in pin GPIO12 - put the port in LOW to enable");
+    }
+}
+
+bool isDebugModeEnabled() {
+    if (!g_debug_mode_initialized) {
+        return false;
+    }
+    
+    // Check every 100ms for responsive state changes
+    unsigned long now = millis();
+    if (now - g_debug_last_check > 100) {
+        // Debug enabled when pin is LOW (connected to GND)
+        bool newState = (digitalRead(DEBUG_MODE_PIN) == LOW);
+        
+        // Detect state change and log it
+        if (newState != g_debug_mode_cached) {
+            g_debug_mode_cached = newState;
+            if (newState) {
+                Serial.println("[SYSTEM] Debug mode ENABLED (GPIO12 -> LOW)");
+            } else {
+                Serial.println("[SYSTEM] Debug mode DISABLED (GPIO12 -> HIGH)");
+            }
+        }
+        
+        g_debug_last_check = now;
+    }
+    
+    return g_debug_mode_cached;
+}
+
 LogBuffer::LogBuffer() {
     mutex_ = xSemaphoreCreateMutex();
 }

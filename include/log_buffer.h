@@ -38,6 +38,27 @@ public:
 // Global log buffer instance
 extern LogBuffer g_log_buffer;
 
+// ============================================================================
+// Debug Mode Control via GPIO12
+// ============================================================================
+// GPIO12 is configured with internal pull-up resistor (default HIGH).
+// When GPIO12 is connected to GND (LOW signal), debug logs are enabled
+// and exported via Serial, regardless of MIN_LOG_LEVEL setting.
+// ============================================================================
+constexpr uint8_t DEBUG_MODE_PIN = 12;
+
+/**
+ * @brief Initialize the debug mode pin (GPIO12 with pull-up)
+ * Should be called during system initialization
+ */
+void initDebugModePin();
+
+/**
+ * @brief Check if debug mode is enabled via GPIO12
+ * @return true if GPIO12 is LOW (debug mode active)
+ */
+bool isDebugModeEnabled();
+
 // Fix #2: Increased buffer size to 512 for safety
 // Macro wrappers that add to both Serial and web buffer
 // Async logging control
@@ -92,11 +113,13 @@ void logToSerialAsync(const char* msg);
 #define MIN_LOG_LEVEL 0
 #endif
 
-#if MIN_LOG_LEVEL <= 0
-#define LOG_DEBUG WEB_LOG_DEBUG
-#else
-#define LOG_DEBUG(...)
-#endif
+// LOG_DEBUG ALWAYS checks GPIO12 pin state (dynamic control)
+// Debug is only printed when GPIO12 is LOW (connected to GND)
+#define LOG_DEBUG(fmt, ...) do { \
+    if (isDebugModeEnabled()) { \
+        WEB_LOG_DEBUG(fmt, ##__VA_ARGS__); \
+    } \
+} while(0)
 
 #if MIN_LOG_LEVEL <= 1
 #define LOG_INFO WEB_LOG_INFO

@@ -1,6 +1,7 @@
 #include "mosfet_controller.h"
 #include "hardware_hal.h"
 #include "file_manager.h"
+#include "led_status.h"
 #include <sys/time.h>
 #include <time.h>
 #include <cstdio>
@@ -136,6 +137,9 @@ bool MOSFETController::startMeasurementAsync(const SweepConfig& config)
     LOG_INFO("  VDS: %.2fV-%.2fV | VGS: %.2fV-%.2fV", 
              config.vds_start, config.vds_end, 
              config.vgs_start, config.vgs_end);
+    
+    // Set LED to measuring pattern
+    led_status::setState(led_status::State::MEASURING);
              
     if (mutex_) xSemaphoreGive(mutex_);
     return true;
@@ -153,6 +157,9 @@ void MOSFETController::measurementTaskWrapper(void* param)
         // Clean up
         controller->measuring_ = false;
         controller->taskHandle_ = nullptr;
+        
+        // Return LED to standby pattern
+        led_status::setState(led_status::State::STANDBY);
         
         LOG_INFO("Async Measurement Task Finished");
     }
@@ -245,7 +252,7 @@ float MOSFETController::readAnalogVoltage()
 
 void MOSFETController::performSweep()
 {
-    results_buffer_.clear();
+    // STREAMING VERSION: Write data directly to file, no memory accumulation
     
     const float vds_start = config_.vds_start;
     const float vds_end = config_.vds_end;
@@ -262,15 +269,59 @@ void MOSFETController::performSweep()
     int total_points = vds_steps * vgs_steps_per_curve;
     int current_point = 0;
     
+    // Open file and write header FIRST
+    String path = String(FileManager::MEASUREMENTS_DIR) + "/" + currentFilename_;
+    File file = FFat.open(path.c_str(), FILE_WRITE);
+    if (!file) {
+        LOG_ERROR("Failed to open file for streaming: %s", path.c_str());
+        hasError_ = true;
+        errorMessage_ = "Failed to open file";
+        return;
+    }
+    
+    // Write header
+    char lineBuf[256];
+    int len;
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# MOSFET Characterization Data\n");
+    file.write((uint8_t*)lineBuf, len);
+    
+    time_t now; time(&now);
+    struct tm* timeinfo = localtime(&now);
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Date: %04d-%02d-%02d %02d:%02d:%02d\n",
+        timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+        timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+    file.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n", config_.rshunt);
+    file.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# VDS Range: %.3f to %.3f V (step %.3f)\n",
+        config_.vds_start, config_.vds_end, config_.vds_step);
+    file.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# VGS Range: %.3f to %.3f V (step %.3f)\n",
+        config_.vgs_start, config_.vgs_end, config_.vgs_step);
+    file.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Settling Time: %d ms\n", config_.settling_ms);
+    file.write((uint8_t*)lineBuf, len);
+    
+    // Column Headers
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds,vgs,vsh,ids\n");
+    file.write((uint8_t*)lineBuf, len);
+    file.flush();
+    
+    LOG_INFO("Header written. Starting streaming measurement...");
+    
+    int rowCount = 0;
+    float lastIds = 0.0f;
+    
     // Outer loop: VDS sweep
     for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
         currentVds_ = vds;
         
-        CurveData curve;
-        curve.vds = vds;
-        
         // Inner loop: VGS sweep
-        int point_count = 0;
         for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
             // Apply target voltages via DAC
             hal::setVDS(vds);
@@ -283,31 +334,46 @@ void MOSFETController::performSweep()
             float vsh = readAnalogVoltage();
             float ids = vsh / rshunt;
             
-            curve.timestamps.push_back(millis());
-            curve.vgs.push_back(vgs);
-            curve.vsh.push_back(vsh);
-            curve.ids.push_back(ids);
+            // Calculate Gm on the fly (simple difference)
+            float gm = 0.0f;
+            if (rowCount > 0 && vgs_step > 0.0001f) {
+                gm = (ids - lastIds) / vgs_step;
+            }
+            lastIds = ids;
             
-            point_count++;
+            // Write data point IMMEDIATELY to file
+            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.6f,%.6e\n",
+                (unsigned long)millis(),
+                vds,
+                vgs,
+                vsh,
+                ids
+            );
+            file.write((uint8_t*)lineBuf, len);
+            
+            rowCount++;
             current_point++;
             progressPercent_ = (current_point * 100) / total_points;
             
-            // Feed watchdog
-            if (point_count % 10 == 0) vTaskDelay(1);
+            // Flush periodically and feed watchdog
+            if (rowCount % 50 == 0) {
+                file.flush();
+                vTaskDelay(1);
+            }
         }
         
-        // Analyze this curve
-        calculateCurveParams(curve);
-        results_buffer_.push_back(curve);
-        
-        LOG_INFO("VDS=%.2fV processed. Points: %d", vds, (int)curve.vgs.size());
+        // Flush after each VDS curve
+        file.flush();
+        LOG_INFO("VDS=%.3fV streamed. Total rows: %d", vds, rowCount);
     }
     
-    // Sweep done. Write file.
+    // Final flush and close
+    file.flush();
+    file.close();
+    
     if (measuring_ && !cancelled_) {
-        writeEnhancedCSV(results_buffer_);
         progressPercent_ = 100;
-        LOG_INFO("Sweep complete. Total curves: %d", (int)results_buffer_.size());
+        LOG_INFO("Streaming complete. Total rows: %d", rowCount);
     }
     
     // Shutdown DACs for safety

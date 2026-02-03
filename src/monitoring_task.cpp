@@ -123,6 +123,11 @@ namespace monitoring
             0 // Core 0
         );
 
+        // Log initial diagnostic values
+        float initTemp = temperatureRead();
+        uint32_t initHeap = ESP.getFreeHeap();
+        Serial.printf("[MONITOR] Initial temp: %.1f°C (internal sensor), Free heap: %lu bytes\n", 
+                      initTemp, (unsigned long)initHeap);
         Serial.println("Monitoring task started");
     }
 

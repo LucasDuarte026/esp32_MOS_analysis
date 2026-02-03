@@ -47,6 +47,25 @@ async function updateSystemInfo() {
         const heapKB = (data.free_heap / 1024).toFixed(1);
         document.getElementById('free-heap').textContent = `${heapKB} KB`;
 
+        // Update Debug Mode status
+        let debugEl = document.getElementById('debug-status');
+        if (!debugEl) {
+            // Create debug status row dynamically if not exists
+            const container = document.querySelector('#free-heap').parentElement.parentElement;
+            const row = document.createElement('div');
+            row.className = 'info-row';
+            row.innerHTML = `<span class="info-label">Debug Log <small style="color:#888">(GPIO12→GND)</small></span><span class="info-value" id="debug-status"></span>`;
+            container.appendChild(row);
+            debugEl = document.getElementById('debug-status');
+        }
+        if (debugEl) {
+            if (data.debug_mode) {
+                debugEl.innerHTML = `<span style="color:#4CAF50">✓ Ativo</span>`;
+            } else {
+                debugEl.innerHTML = `<span style="color:#F44336">✗ Inativo</span>`;
+            }
+        }
+
         // Update VDD if USB is connected
         if (data.usb_connected) {
             currentVDD = 5.0;
@@ -392,7 +411,7 @@ document.getElementById('file-select')?.addEventListener('change', async (e) => 
         uniqueVDSValues.forEach((vds, idx) => {
             const option = document.createElement('option');
             option.value = vds;
-            option.textContent = `VDS = ${vds.toFixed(2)} V`;
+            option.textContent = `VDS = ${vds.toFixed(3)} V`;
             vdsSelect.appendChild(option);
         });
 
@@ -635,10 +654,10 @@ function updatePlotsMultiCurve() {
     const xDomainEnd = secondaryAxes > 0 ? 1 - (secondaryAxes * 0.08) : 1;
 
     // Construct Title with Analysis Results
-    let titleText = `Curvas MOSFET (VDS = ${parseFloat(selectedVDS || uniqueVDSValues[0] || 0).toFixed(2)} V)`;
+    let titleText = `Curvas MOSFET (VDS = ${parseFloat(selectedVDS || uniqueVDSValues[0] || 0).toFixed(3)} V)`;
     titleText += `<br><span style="font-size: 12px; color: #ccc;">`;
     titleText += `Vt: <b>${vtValue.toFixed(3)} V</b> | `;
-    titleText += `SS: <b>${ssValue.toFixed(1)} mV/dec</b> | `;
+    titleText += `SS: <b>${ssValue.toFixed(3)} mV/dec</b> | `;
     titleText += `MaxGm: <b>${maxGmValue.toExponential(2)} S</b>`;
     titleText += `</span>`;
 
@@ -755,7 +774,7 @@ function updateMetrics(plotData) {
 
     if (vtEl) vtEl.textContent = `${vtAtMaxGm.toFixed(3)} V`;
     if (gmEl) gmEl.textContent = `${(maxGm * 1000).toFixed(3)} mS`;
-    if (ssEl) ssEl.textContent = `${avgSS.toFixed(1)} mV/dec`;
+    if (ssEl) ssEl.textContent = `${avgSS.toFixed(3)} mV/dec`;
 }
 
 // Listen for VDS changes
