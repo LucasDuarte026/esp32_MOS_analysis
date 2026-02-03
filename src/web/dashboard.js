@@ -938,4 +938,86 @@ setInterval(loadMeasurementList, 10000);
 updateLogs();
 setInterval(updateLogs, 2000);
 
+// =============================================================================
+// Scroll-to-change functionality for select elements
+// Allows changing select options by scrolling with mouse wheel while hovering
+// =============================================================================
+function enableScrollOnSelect(selectElement) {
+    if (!selectElement) return;
+
+    selectElement.addEventListener('wheel', (e) => {
+        // Only act if element is not disabled
+        if (selectElement.disabled) return;
+
+        // Prevent page scroll
+        e.preventDefault();
+
+        const options = selectElement.options;
+        const currentIndex = selectElement.selectedIndex;
+
+        // Determine scroll direction
+        const direction = e.deltaY > 0 ? 1 : -1;
+
+        // Calculate new index with bounds checking
+        let newIndex = currentIndex + direction;
+
+        // Skip empty/placeholder options (value === "")
+        while (newIndex >= 0 && newIndex < options.length && options[newIndex].value === "") {
+            newIndex += direction;
+        }
+
+        // Clamp to valid range
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex >= options.length) newIndex = options.length - 1;
+
+        // Skip if landing on placeholder
+        if (options[newIndex].value === "" && currentIndex !== newIndex) {
+            return;
+        }
+
+        // Only update if changed
+        if (newIndex !== currentIndex && options[newIndex].value !== "") {
+            selectElement.selectedIndex = newIndex;
+
+            // Dispatch change event to trigger any listeners
+            selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }, { passive: false });
+
+    // Visual feedback on hover
+    selectElement.addEventListener('mouseenter', () => {
+        selectElement.style.cursor = 'ns-resize';
+    });
+
+    selectElement.addEventListener('mouseleave', () => {
+        selectElement.style.cursor = '';
+    });
+}
+
+// Apply to all select-field elements
+document.querySelectorAll('.select-field').forEach(select => {
+    enableScrollOnSelect(select);
+});
+
+// Also apply to dynamically created selects (MutationObserver)
+const selectObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+            if (node.nodeType === 1) { // Element node
+                if (node.classList?.contains('select-field')) {
+                    enableScrollOnSelect(node);
+                }
+                // Check children
+                node.querySelectorAll?.('.select-field').forEach(select => {
+                    enableScrollOnSelect(select);
+                });
+            }
+        });
+    });
+});
+
+selectObserver.observe(document.body, { childList: true, subtree: true });
+
 console.log('MOSFET Characterization Dashboard initialized (Multi-Page Architecture)');
+console.log('Scroll-to-change enabled on select elements');
+
