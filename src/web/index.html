@@ -86,6 +86,24 @@
                             <h2>Configurações de Medida</h2>
                         </div>
                         <div class="card-body">
+                            <!-- Sweep Mode Toggle -->
+                            <div class="sweep-mode-section"
+                                style="margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 2px solid var(--border-color);">
+                                <h3 style="margin-bottom: var(--spacing-md);">Modo de Varredura</h3>
+                                <div class="sweep-mode-toggle">
+                                    <span class="mode-label mode-active" id="mode-vgs-label">Curva Id × Vgs</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="sweep-mode-toggle">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span class="mode-label mode-dimmed" id="mode-vds-label">Curva Id × Vds</span>
+                                </div>
+                                <small class="helper-text"
+                                    style="display: block; margin-top: var(--spacing-sm); text-align: center;">
+                                    <span id="sweep-mode-desc">Varia VGS para cada VDS fixo (padrão)</span>
+                                </small>
+                            </div>
+
                             <!-- VDS Configuration Section -->
                             <div
                                 style="margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 2px solid var(--border-color);">
@@ -235,6 +253,26 @@
                                 <span class="info-label">Memória Livre</span>
                                 <span class="info-value" id="free-heap">-- KB</span>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- File Management Card (Delete All) -->
+                    <div class="card card-compact" style="border-color: rgba(244, 67, 54, 0.3);">
+                        <div class="card-header">
+                            <h3 style="color: var(--danger-color, #F44336);">Gerenciamento de Dados</h3>
+                        </div>
+                        <div class="card-body">
+                            <p style="margin-bottom: 12px; font-size: 14px; color: #bbb;">
+                                Ações críticas de armazenamento. Tenha cuidado.
+                            </p>
+                            <button class="btn btn-danger" id="btn-delete-all" style="width: 100%;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                DELETAR TUDO
+                            </button>
                         </div>
                     </div>
 

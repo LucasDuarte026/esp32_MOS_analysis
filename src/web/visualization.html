@@ -90,11 +90,20 @@
                                 </svg>
                                 Download CSV
                             </button>
+                            <button class="btn btn-danger" id="btn-delete-measurement" disabled
+                                title="Deletar arquivo permanentemente" style="margin-left: 8px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M3 6h18" />
+                                    <path
+                                        d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                </svg>
+                            </button>
                         </div>
 
-                        <!-- Row 2: VDS Selector -->
+                        <!-- Row 2: VDS/VGS Curve Selector -->
                         <div class="form-group">
-                            <label for="vds-select">Selecionar Curva VDS</label>
+                            <label for="vds-select" id="curve-select-label">Selecionar Curva VDS</label>
                             <select id="vds-select" class="select-field" disabled>
                                 <option value="">Aguardando arquivo...</option>
                             </select>
@@ -145,8 +154,8 @@
                 <!-- Metrics Cards -->
                 <div class="metrics-grid">
                     <div class="card card-metric">
-                        <div class="metric-icon" style="background: rgba(33, 150, 243, 0.1);">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2196F3"
+                        <div class="metric-icon" style="background: rgba(76, 175, 80, 0.1);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4CAF50"
                                 stroke-width="2">
                                 <path d="M3 12h18M3 6h18M3 18h18" />
                             </svg>

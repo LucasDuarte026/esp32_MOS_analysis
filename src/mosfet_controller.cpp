@@ -262,11 +262,18 @@ void MOSFETController::performSweep()
     const float vgs_step = config_.vgs_step;
     const float rshunt = config_.rshunt;
     const int settling = config_.settling_ms;
+    const bool sweepVDS = (config_.sweep_mode == SWEEP_VDS);
     
     // Calculate total steps for progress
-    int vds_steps = (int)((vds_end - vds_start) / vds_step) + 1;
-    int vgs_steps_per_curve = (int)((vgs_end - vgs_start) / vgs_step) + 1;
-    int total_points = vds_steps * vgs_steps_per_curve;
+    int outer_steps, inner_steps;
+    if (sweepVDS) {
+        outer_steps = (int)((vgs_end - vgs_start) / vgs_step) + 1;
+        inner_steps = (int)((vds_end - vds_start) / vds_step) + 1;
+    } else {
+        outer_steps = (int)((vds_end - vds_start) / vds_step) + 1;
+        inner_steps = (int)((vgs_end - vgs_start) / vgs_step) + 1;
+    }
+    int total_points = outer_steps * inner_steps;
     int current_point = 0;
     
     // Open file and write header FIRST
@@ -293,6 +300,10 @@ void MOSFETController::performSweep()
         timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
     file.write((uint8_t*)lineBuf, len);
     
+    // SWEEP MODE FLAG - critical for visualization
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Sweep Mode: %s\n", sweepVDS ? "VDS" : "VGS");
+    file.write((uint8_t*)lineBuf, len);
+    
     len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n", config_.rshunt);
     file.write((uint8_t*)lineBuf, len);
     
@@ -312,59 +323,96 @@ void MOSFETController::performSweep()
     file.write((uint8_t*)lineBuf, len);
     file.flush();
     
-    LOG_INFO("Header written. Starting streaming measurement...");
+    LOG_INFO("Header written. Starting %s sweep...", sweepVDS ? "VDS" : "VGS");
     
     int rowCount = 0;
-    float lastIds = 0.0f;
     
-    // Outer loop: VDS sweep
-    for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
-        currentVds_ = vds;
-        
-        // Inner loop: VGS sweep
+    // Temporary buffer for one curve (cleared after each outer loop iteration)
+    CurveData currentCurve;
+    
+    if (sweepVDS) {
+        // MODE: Curva Id x Vds (outer=VGS, inner=VDS)
         for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
-            // Apply target voltages via DAC
-            hal::setVDS(vds);
-            hal::setVGS(vgs);
+            currentVds_ = vgs; // Use for progress display (outer loop var)
             
-            // Wait for settling
-            vTaskDelay(pdMS_TO_TICKS(settling));
-            
-            // Read shunt voltage
-            float vsh = readAnalogVoltage();
-            float ids = vsh / rshunt;
-            
-            // Calculate Gm on the fly (simple difference)
-            float gm = 0.0f;
-            if (rowCount > 0 && vgs_step > 0.0001f) {
-                gm = (ids - lastIds) / vgs_step;
+            for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
+                hal::setVDS(vds);
+                hal::setVGS(vgs);
+                vTaskDelay(pdMS_TO_TICKS(settling));
+                
+                float vsh = readAnalogVoltage();
+                float ids = vsh / rshunt;
+                
+                // Safe formatted write
+                // %lu = unsigned long (timestamp)
+                // %.3f = VDS, VGS (3 decimals)
+                // %.6f = Vsh (6 decimals)
+                // %.6e = Ids (scientific)
+                file.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
+                           (unsigned long)millis(), vds, vgs, vsh, ids);
+                
+                rowCount++;
+                current_point++;
+                progressPercent_ = (current_point * 100) / total_points;
+                
+                if (rowCount % 50 == 0) {
+                    file.flush();
+                    vTaskDelay(1);
+                }
             }
-            lastIds = ids;
             
-            // Write data point IMMEDIATELY to file
-            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.6f,%.6e\n",
-                (unsigned long)millis(),
-                vds,
-                vgs,
-                vsh,
-                ids
-            );
-            file.write((uint8_t*)lineBuf, len);
-            
-            rowCount++;
-            current_point++;
-            progressPercent_ = (current_point * 100) / total_points;
-            
-            // Flush periodically and feed watchdog
-            if (rowCount % 50 == 0) {
-                file.flush();
-                vTaskDelay(1);
-            }
+            // In VDS mode, parameters like Vt/SS/Gm are not strictly defined per VDS curve
+            file.flush();
+            LOG_INFO("VGS=%.3fV streamed. Rows: %d", vgs, rowCount);
         }
-        
-        // Flush after each VDS curve
-        file.flush();
-        LOG_INFO("VDS=%.3fV streamed. Total rows: %d", vds, rowCount);
+    } else {
+        // MODE: Curva Id x Vgs (outer=VDS, inner=VGS) - default
+        for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
+            currentVds_ = vds;
+            
+            // Reset curve buffer for this VDS value
+            currentCurve = CurveData();
+            currentCurve.vds = vds;
+            currentCurve.rshunt = rshunt; // Pass Rshunt for SS context if needed
+            
+            for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
+                hal::setVDS(vds);
+                hal::setVGS(vgs);
+                vTaskDelay(pdMS_TO_TICKS(settling));
+                
+                float vsh = readAnalogVoltage();
+                float ids = vsh / rshunt;
+                
+                // Buffer data for parameter calculation
+                currentCurve.vgs.push_back(vgs);
+                currentCurve.ids.push_back(ids);
+                currentCurve.vsh.push_back(vsh);
+                currentCurve.timestamps.push_back(millis());
+                
+                // Safe write
+                file.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
+                           (unsigned long)millis(), vds, vgs, vsh, ids);
+                
+                rowCount++;
+                current_point++;
+                progressPercent_ = (current_point * 100) / total_points;
+                
+                if (rowCount % 50 == 0) {
+                    file.flush();
+                    vTaskDelay(1);
+                }
+            }
+            
+            // Calculate parameters for this curve
+            calculateCurveParams(currentCurve);
+            
+            // Write curve metadata as comment using printf for safety
+            file.printf("# VDS=%.3fV: Vt=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S\n", 
+                       vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
+            
+            file.flush();
+            LOG_INFO("VDS=%.3fV: Vt=%.3f, SS=%.1f mV/dec, MaxGm=%.2e", vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
+        }
     }
     
     // Final flush and close
@@ -373,7 +421,7 @@ void MOSFETController::performSweep()
     
     if (measuring_ && !cancelled_) {
         progressPercent_ = 100;
-        LOG_INFO("Streaming complete. Total rows: %d", rowCount);
+        LOG_INFO("Streaming complete. Mode=%s, Total rows: %d", sweepVDS ? "VDS" : "VGS", rowCount);
     }
     
     // Shutdown DACs for safety
@@ -426,13 +474,29 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
     curve.max_gm = *max_gm_it;
     
     // 4. SS = 1/Slope of Log(Ids) vs Vgs
-    // Region: 1e-10 < Ids < 1e-6
+    // Region: Subthreshold - expanded range for different current levels
+    // Try multiple ranges to find valid subthreshold region
     std::vector<float> x, y;
+    
+    // First try standard subthreshold region
     for(size_t i=0; i<n; i++) {
         float val = fabs(curve.ids[i]);
-        if(val > 1e-10 && val < 1e-6) {
+        if(val > 1e-10 && val < 1e-5) {  // Expanded from 1e-6 to 1e-5
             x.push_back(curve.vgs[i]);
             y.push_back(log10(val));
+        }
+    }
+    
+    // If not enough points, try wider range
+    if(x.size() < 5) {
+        x.clear();
+        y.clear();
+        for(size_t i=0; i<n; i++) {
+            float val = fabs(curve.ids[i]);
+            if(val > 1e-9 && val < 1e-4) {
+                x.push_back(curve.vgs[i]);
+                y.push_back(log10(val));
+            }
         }
     }
     
@@ -453,6 +517,7 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
             }
         }
     }
+    // Note: SS remains 0.0 if not calculable (e.g., VDS sweep curves)
 }
 
 void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {

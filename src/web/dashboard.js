@@ -3,6 +3,7 @@ let currentVDD = 5.0; // Default VDD voltage
 let usbConnected = false;
 let currentCSVData = []; // Store full parsed CSV data
 let uniqueVDSValues = []; // Store unique VDS values found in CSV
+let currentSweepMode = 'VGS'; // Sweep mode from CSV header: 'VGS' or 'VDS'
 
 // Multi-page architecture. No tab navigation here.
 
@@ -120,6 +121,29 @@ document.getElementById('email-message')?.addEventListener('input', (e) => {
     document.getElementById('char-count').textContent = e.target.value.length;
 });
 
+// Sweep Mode Toggle - update visual state and description
+document.getElementById('sweep-mode-toggle')?.addEventListener('change', (e) => {
+    const vgsLabel = document.getElementById('mode-vgs-label');
+    const vdsLabel = document.getElementById('mode-vds-label');
+    const descEl = document.getElementById('sweep-mode-desc');
+
+    if (e.target.checked) {
+        // VDS mode (Curva Id x Vds)
+        vgsLabel.classList.remove('mode-active');
+        vgsLabel.classList.add('mode-dimmed');
+        vdsLabel.classList.remove('mode-dimmed');
+        vdsLabel.classList.add('mode-active');
+        if (descEl) descEl.textContent = 'Varia VDS para cada VGS fixo';
+    } else {
+        // VGS mode (Curva Id x Vgs) - default
+        vgsLabel.classList.add('mode-active');
+        vgsLabel.classList.remove('mode-dimmed');
+        vdsLabel.classList.add('mode-dimmed');
+        vdsLabel.classList.remove('mode-active');
+        if (descEl) descEl.textContent = 'Varia VGS para cada VDS fixo (padrão)';
+    }
+});
+
 // Visible curves state (for toggle buttons)
 let visibleCurves = {
     ids: true,
@@ -211,6 +235,12 @@ document.getElementById('btn-start-collection')?.addEventListener('click', async
     // Validate inputs
     let errorMsg = '';
 
+    // Filename Validation (Strict)
+    const validFilenameRegex = /^[a-zA-Z0-9_\-\.]+$/;
+    if (filename && !validFilenameRegex.test(filename)) {
+        errorMsg += '- Nome do arquivo inválido (use apenas letras, números, _, - e .)\n';
+    }
+
     // VGS Validations
     if (isNaN(vgsStart) || isNaN(vgsEnd) || isNaN(vgsStep)) errorMsg += '- Parâmetros VGS inválidos\n';
     else if (vgsStep <= 0) errorMsg += '- Passo VGS deve ser positivo\n';
@@ -227,6 +257,11 @@ document.getElementById('btn-start-collection')?.addEventListener('click', async
         return;
     }
 
+
+    // Get sweep mode from toggle
+    const sweepModeToggle = document.getElementById('sweep-mode-toggle');
+    const sweepMode = sweepModeToggle && sweepModeToggle.checked ? 'VDS' : 'VGS';
+
     const config = {
         vgs_start: vgsStart,
         vgs_end: vgsEnd,
@@ -237,6 +272,7 @@ document.getElementById('btn-start-collection')?.addEventListener('click', async
         rshunt: rshunt,
         settling_ms: settlingTime || 5,
         filename: filename || 'mosfet_data.csv',
+        sweep_mode: sweepMode,
         timestamp: Math.floor(Date.now() / 1000)
     };
 
@@ -380,6 +416,7 @@ document.head.appendChild(style);
 // File selector for visualization tab
 document.getElementById('file-select')?.addEventListener('change', async (e) => {
     const downloadBtn = document.getElementById('btn-download-measurement');
+    const deleteBtn = document.getElementById('btn-delete-measurement');
     const vdsSelect = document.getElementById('vds-select');
     const selectedFile = e.target.value;
 
@@ -387,14 +424,16 @@ document.getElementById('file-select')?.addEventListener('change', async (e) => 
     currentSelectedFile = selectedFile;
 
     if (!selectedFile || selectedFile === '') {
-        downloadBtn.disabled = true;
+        if (downloadBtn) downloadBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
         vdsSelect.disabled = true;
         vdsSelect.innerHTML = '<option value="">Selecione um arquivo primeiro...</option>';
         currentCSVData = [];
         return;
     }
 
-    downloadBtn.disabled = false;
+    if (downloadBtn) downloadBtn.disabled = false;
+    if (deleteBtn) deleteBtn.disabled = false;
     vdsSelect.disabled = true;
     vdsSelect.innerHTML = '<option value="">Carregando dados...</option>';
 
@@ -406,19 +445,34 @@ document.getElementById('file-select')?.addEventListener('change', async (e) => 
         const csvText = await response.text();
         parseCSV(csvText);
 
-        // Populate VDS Select with values from CSV (no 'all' option)
+        // Update curve selector label based on sweep mode
+        const curveLabel = document.getElementById('curve-select-label');
+        if (curveLabel) {
+            if (currentSweepMode === 'VDS') {
+                curveLabel.textContent = 'Selecionar Curva VGS:';
+            } else {
+                curveLabel.textContent = 'Selecionar Curva VDS:';
+            }
+        }
+
+        // Populate curve Select with values from CSV (no 'all' option)
         vdsSelect.innerHTML = '';
-        uniqueVDSValues.forEach((vds, idx) => {
+        uniqueVDSValues.forEach((val, idx) => {
             const option = document.createElement('option');
-            option.value = vds;
-            option.textContent = `VDS = ${vds.toFixed(3)} V`;
+            option.value = val;
+            if (currentSweepMode === 'VDS') {
+                option.textContent = `VGS = ${val.toFixed(3)} V`;
+            } else {
+                option.textContent = `VDS = ${val.toFixed(3)} V`;
+            }
             vdsSelect.appendChild(option);
         });
 
-        // Select first VDS by default
+        // Select first value by default
         if (uniqueVDSValues.length > 0) {
             vdsSelect.value = uniqueVDSValues[0];
         }
+
 
         vdsSelect.disabled = false;
         updatePlotsMultiCurve(); // Use multi-curve plot function
@@ -480,6 +534,15 @@ function parseCSV(csvText) {
         if (line.includes('timestamp,vds') || line.includes('time,vds')) {
             dataStartIndex = i + 1;
             console.log(`[DEBUG] Found header at line ${i}: ${line}`);
+        }
+
+        // DETECT SWEEP MODE from header: "# Sweep Mode: VGS" or "# Sweep Mode: VDS"
+        if (line.startsWith('# Sweep Mode:')) {
+            const modeMatch = line.match(/# Sweep Mode:\s*(VGS|VDS)/i);
+            if (modeMatch) {
+                currentSweepMode = modeMatch[1].toUpperCase();
+                console.log(`[DEBUG] Detected sweep mode: ${currentSweepMode}`);
+            }
         }
 
         // Parse Analysis Metadata: "# VDS=0.50V: Vt=1.200V, SS=85.00 mV/dec, MaxGm=1.200e-03 S"
@@ -558,7 +621,7 @@ function parseCSV(csvText) {
                 vgs: vgs,
                 vsh: vsh,
                 ids: isNaN(ids) ? 0 : ids,
-                gm: isNaN(gm) ? 0 : gm,
+                gm: isNaN(gm) ? 0 : gm, // Will be recalculated if 0
                 vt: vt,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
@@ -570,6 +633,11 @@ function parseCSV(csvText) {
 
     // Sort VDS values
     uniqueVDSValues = Array.from(vdsSet).sort((a, b) => a - b);
+
+    // Recalculate Gm if missing (since backend streaming doesn't include it per point)
+    calculateGmForData(currentCSVData, currentSweepMode);
+    calculateSSForData(currentCSVData); // Recalculate SS for frontend visualization
+
     console.log(`[DEBUG] Parsed ${currentCSVData.length} valid points. Unique VDS:`, uniqueVDSValues);
 
     if (currentCSVData.length === 0) {
@@ -580,21 +648,111 @@ function parseCSV(csvText) {
 
 // Helper to show errors in UI and Alert
 function logErrorAndAlert(msg) {
-    alert(msg);
+    showToast(msg, 'error');
+    console.error('[CSV ERROR] ' + msg);
     const logContent = document.getElementById('log-content');
     if (logContent) {
         const entry = document.createElement('div');
-        entry.className = 'log-entry log-error'; // Assuming css classes exist or inherit
+        entry.className = 'log-entry log-error';
         entry.style.color = '#ff4444';
-        entry.textContent = '[JS ERROR] ' + msg;
+        entry.textContent = '[ERRO] ' + msg;
         logContent.insertBefore(entry, logContent.firstChild);
     }
 }
 
+// Helper to calculate Gm (dIds/dVgs) if missing or 0
+function calculateGmForData(data, sweepMode) {
+    if (!data || data.length < 2) return;
+
+    // Group by curve (VDS in VGS mode, VGS in VDS mode)
+    const curves = {};
+    data.forEach(d => {
+        const key = sweepMode === 'VDS' ? d.vgs : d.vds;
+        if (!curves[key]) curves[key] = [];
+        curves[key].push(d);
+    });
+
+    // Calculate Gm for each curve
+    Object.keys(curves).forEach(k => {
+        const curve = curves[k];
+        // Sort by X-axis (VGS in VGS mode, VDS in VDS mode)
+        curve.sort((a, b) => (sweepMode === 'VDS' ? a.vds - b.vds : a.vgs - b.vgs));
+
+        for (let i = 1; i < curve.length - 1; i++) {
+            // Central difference
+            const prev = curve[i - 1];
+            const next = curve[i + 1];
+
+            const dx = sweepMode === 'VDS' ? (next.vds - prev.vds) : (next.vgs - prev.vgs);
+            const dy = next.ids - prev.ids;
+
+            if (Math.abs(dx) > 1e-6) {
+                curve[i].gm = dy / dx;
+            }
+        }
+    });
+}
+
+// Helper to calculate SS (d Vgs / d log10(Ids))
+function calculateSSForData(data) {
+    if (!data || data.length < 5) return;
+
+    // Group by curve (assume VGS mode for SS calculation usually)
+    const curves = {};
+
+    data.forEach(d => {
+        const key = d.vds;
+        if (!curves[key]) curves[key] = [];
+        curves[key].push(d);
+    });
+
+    Object.keys(curves).forEach(k => {
+        const curve = curves[k];
+        curve.sort((a, b) => a.vgs - b.vgs);
+
+        let bestSS = 0;
+
+        for (let i = 1; i < curve.length - 1; i++) {
+            const currentIds = Math.abs(curve[i].ids);
+
+            // Allow wider range for calculation, filter later
+            if (currentIds > 1e-12) {
+                const prev = curve[i - 1];
+                const next = curve[i + 1];
+
+                const dVgs = next.vgs - prev.vgs;
+                const dLogIds = Math.log10(Math.abs(next.ids)) - Math.log10(Math.abs(prev.ids));
+
+                if (Math.abs(dVgs) > 1e-6 && Math.abs(dLogIds) > 1e-6) {
+                    const slope = dLogIds / dVgs; // decades per volt
+                    if (slope > 0.01) {
+                        const localSS = (1 / slope) * 1000; // mV/dec
+                        curve[i].ss_instant = localSS; // Store for plotting
+
+                        // Find min valid SS (steepest slope) in subthreshold region
+                        // Filter out noise: SS should be reasonable (e.g. > 20 mV/dec)
+                        if (currentIds < 1e-4) {
+                            if ((bestSS === 0 || localSS < bestSS) && localSS > 20) {
+                                bestSS = localSS;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Assign calculated min SS to all points
+        if (bestSS > 0) {
+            curve.forEach(p => p.ss = bestSS);
+        }
+    });
+}
+
+
 // Multi-curve plot function that respects toggle buttons
 function updatePlotsMultiCurve() {
     const vdsSelect = document.getElementById('vds-select');
-    const selectedVDS = vdsSelect ? vdsSelect.value : 'all';
+    const selectedVDS = vdsSelect ? vdsSelect.value : null;
 
     if (currentCSVData.length === 0) return;
 
@@ -606,18 +764,47 @@ function updatePlotsMultiCurve() {
         vt: '#4CAF50'    // Green
     };
 
-    // Get data for selected VDS
-    const vdsVal = parseFloat(selectedVDS) || (uniqueVDSValues.length > 0 ? uniqueVDSValues[0] : 0);
-    let plotData = currentCSVData.filter(d => Math.abs(d.vds - vdsVal) < 0.001);
+    // Get data for selected curve value
+    const curveVal = parseFloat(selectedVDS) || (uniqueVDSValues.length > 0 ? uniqueVDSValues[0] : 0);
 
-    plotData.sort((a, b) => a.vgs - b.vgs);
+    let plotData;
+    if (currentSweepMode === 'VDS') {
+        plotData = currentCSVData.filter(d => Math.abs(d.vgs - curveVal) < 0.001);
+        plotData.sort((a, b) => a.vds - b.vds);
+    } else {
+        plotData = currentCSVData.filter(d => Math.abs(d.vds - curveVal) < 0.001);
+        plotData.sort((a, b) => a.vgs - b.vgs);
+    }
 
     if (plotData.length === 0) return;
 
-    // Add traces based on visible curves
+    const xData = currentSweepMode === 'VDS' ? plotData.map(d => d.vds) : plotData.map(d => d.vgs);
+
+    // Disable incompatible toggles in VDS mode
+    const toggleGm = document.getElementById('toggle-gm');
+    const toggleSs = document.getElementById('toggle-ss');
+    const toggleVt = document.getElementById('toggle-vt');
+
+    if (currentSweepMode === 'VDS') {
+        if (toggleGm) { toggleGm.disabled = true; toggleGm.style.opacity = "0.3"; toggleGm.style.pointerEvents = "none"; }
+        if (toggleSs) { toggleSs.disabled = true; toggleSs.style.opacity = "0.3"; toggleSs.style.pointerEvents = "none"; }
+        if (toggleVt) { toggleVt.disabled = true; toggleVt.style.opacity = "0.3"; toggleVt.style.pointerEvents = "none"; }
+        visibleCurves.gm = false;
+        visibleCurves.ss = false;
+        visibleCurves.vt = false;
+        toggleGm?.classList.remove('active');
+        toggleSs?.classList.remove('active');
+        toggleVt?.classList.remove('active');
+    } else {
+        if (toggleGm) { toggleGm.disabled = false; toggleGm.style.opacity = "1"; toggleGm.style.pointerEvents = "auto"; }
+        if (toggleSs) { toggleSs.disabled = false; toggleSs.style.opacity = "1"; toggleSs.style.pointerEvents = "auto"; }
+        if (toggleVt) { toggleVt.disabled = false; toggleVt.style.opacity = "1"; toggleVt.style.pointerEvents = "auto"; }
+    }
+
+    // Trace 1: Ids
     if (visibleCurves.ids) {
         traces.push({
-            x: plotData.map(d => d.vgs),
+            x: xData,
             y: plotData.map(d => d.ids),
             mode: 'lines+markers',
             type: 'scatter',
@@ -628,9 +815,10 @@ function updatePlotsMultiCurve() {
         });
     }
 
+    // Trace 2: Gm
     if (visibleCurves.gm) {
         traces.push({
-            x: plotData.map(d => d.vgs),
+            x: xData,
             y: plotData.map(d => d.gm),
             mode: 'lines+markers',
             type: 'scatter',
@@ -639,6 +827,27 @@ function updatePlotsMultiCurve() {
             line: { color: colors.gm, shape: 'spline' },
             marker: { size: 4 }
         });
+    }
+
+    // Trace 3: SS (Instantaneous)
+    if (visibleCurves.ss) {
+        // Filter out undefined SS points
+        const validSS = plotData.map((d, i) => ({ x: xData[i], y: d.ss_instant }));
+        const xSS = validSS.filter(p => p.y && p.y < 5000).map(p => p.x); // Filter huge spikes
+        const ySS = validSS.filter(p => p.y && p.y < 5000).map(p => p.y);
+
+        if (ySS.length > 0) {
+            traces.push({
+                x: xSS,
+                y: ySS,
+                mode: 'lines+markers',
+                type: 'scatter',
+                name: 'SS (mV/dec)',
+                yaxis: 'y3', // Separate axis for SS
+                line: { color: colors.ss, shape: 'spline', dash: 'dot' },
+                marker: { size: 3 }
+            });
+        }
     }
 
     // Vt and SS are now scalar values per curve, so we visualize them differently
@@ -653,13 +862,18 @@ function updatePlotsMultiCurve() {
     const rightMargin = 60 + (secondaryAxes * 50);
     const xDomainEnd = secondaryAxes > 0 ? 1 - (secondaryAxes * 0.08) : 1;
 
-    // Construct Title with Analysis Results
-    let titleText = `Curvas MOSFET (VDS = ${parseFloat(selectedVDS || uniqueVDSValues[0] || 0).toFixed(3)} V)`;
+    // Construct Title with Analysis Results - use dynamic label based on sweep mode
+    const curveLabel = currentSweepMode === 'VDS' ? 'VGS' : 'VDS';
+    const curveValue = parseFloat(selectedVDS || uniqueVDSValues[0] || 0).toFixed(3);
+    let titleText = `Curvas MOSFET (${curveLabel} = ${curveValue} V)`;
     titleText += `<br><span style="font-size: 12px; color: #ccc;">`;
     titleText += `Vt: <b>${vtValue.toFixed(3)} V</b> | `;
     titleText += `SS: <b>${ssValue.toFixed(3)} mV/dec</b> | `;
     titleText += `MaxGm: <b>${maxGmValue.toExponential(2)} S</b>`;
     titleText += `</span>`;
+
+    // X-axis label depends on sweep mode
+    const xAxisLabel = currentSweepMode === 'VDS' ? 'VDS (V)' : 'VGS (V)';
 
     const layout = {
         title: {
@@ -671,7 +885,7 @@ function updatePlotsMultiCurve() {
         font: { color: '#bdbdbd' },
 
         xaxis: {
-            title: 'VGS (V)',
+            title: xAxisLabel,
             domain: [0, xDomainEnd],
             gridcolor: '#333',
             zerolinecolor: '#666'
@@ -692,6 +906,18 @@ function updatePlotsMultiCurve() {
             side: 'right',
             position: xDomainEnd,
             showgrid: false
+        },
+        yaxis3: {
+            title: 'SS (mV/dec)',
+            titlefont: { color: colors.ss },
+            tickfont: { color: colors.ss },
+            anchor: 'free',
+            overlaying: 'y',
+            side: 'right',
+            position: xDomainEnd + 0.08, // Offset to right of Gm
+            showgrid: false,
+            // Only show if SS visible
+            visible: visibleCurves.ss
         },
         margin: { t: 80, r: rightMargin, l: 60, b: 60 },
         showlegend: true,
@@ -745,8 +971,35 @@ function updatePlotsMultiCurve() {
 }
 
 // Update metric cards with calculated values
+// Update metric cards with calculated values
 function updateMetrics(plotData) {
+    const vtEl = document.getElementById('metric-vt');
+    const gmEl = document.getElementById('metric-gm');
+    const ssEl = document.getElementById('metric-ss');
+
+    if (currentSweepMode === 'VDS') {
+        const msg = "Não contém em Curva VDS";
+        if (vtEl) {
+            vtEl.textContent = msg;
+            vtEl.style.fontSize = "14px"; // Adjust font size for longer text
+        }
+        if (gmEl) {
+            gmEl.textContent = msg;
+            gmEl.style.fontSize = "14px";
+        }
+        if (ssEl) {
+            ssEl.textContent = msg;
+            ssEl.style.fontSize = "14px";
+        }
+        return;
+    }
+
     if (!plotData || plotData.length === 0) return;
+
+    // Reset font size
+    if (vtEl) vtEl.style.fontSize = "";
+    if (gmEl) gmEl.style.fontSize = "";
+    if (ssEl) ssEl.style.fontSize = "";
 
     // Find max Gm and corresponding Vt
     let maxGm = 0;
@@ -766,11 +1019,6 @@ function updateMetrics(plotData) {
     });
 
     avgSS = ssCount > 0 ? avgSS / ssCount : 0;
-
-    // Update UI
-    const vtEl = document.getElementById('metric-vt');
-    const gmEl = document.getElementById('metric-gm');
-    const ssEl = document.getElementById('metric-ss');
 
     if (vtEl) vtEl.textContent = `${vtAtMaxGm.toFixed(3)} V`;
     if (gmEl) gmEl.textContent = `${(maxGm * 1000).toFixed(3)} mS`;
@@ -1038,5 +1286,98 @@ const selectObserver = new MutationObserver((mutations) => {
 selectObserver.observe(document.body, { childList: true, subtree: true });
 
 console.log('MOSFET Characterization Dashboard initialized (Multi-Page Architecture)');
+
+// Feature: Real-time Filename Validation
+document.getElementById('filename')?.addEventListener('input', (e) => {
+    const input = e.target;
+    const infoText = input.nextElementSibling; // helper-text
+    const validRegex = /^[a-zA-Z0-9_\-\.]+$/;
+
+    if (input.value && !validRegex.test(input.value)) {
+        input.style.borderColor = "#F44336"; // Red
+        if (infoText) {
+            infoText.style.color = "#F44336";
+            infoText.textContent = "Nome inválido! Use apenas letras, números, _ . ou -";
+        }
+    } else {
+        input.style.borderColor = ""; // Reset
+        if (infoText) {
+            infoText.style.color = "";
+            infoText.textContent = "Arquivo com timestamps, VDS, VGS, Vsh, Ids, Gm, parâmetros"; // Restore original text or keep empty if dynamic
+        }
+    }
+});
+
+// Feature: Delete Single Measurement Logic from Visualization Tab
+document.getElementById('btn-delete-measurement')?.addEventListener('click', async () => {
+    const selectedValue = document.getElementById('file-select').value;
+    if (!selectedValue) return;
+
+    if (!confirm(`Tem certeza que deseja deletar o arquivo "${selectedValue}"?\nEsta ação é irreversível.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/files/delete?file=${encodeURIComponent(selectedValue)}`, { method: 'POST' });
+        if (!response.ok) throw new Error("Falha ao deletar arquivo");
+
+        showToast(`Arquivo "${selectedValue}" deletado com sucesso.`, 'success');
+
+        // Reset plots
+        currentCSVData = [];
+        const plotDiv = document.getElementById('plot-container');
+        if (plotDiv) Plotly.purge(plotDiv);
+
+        // Reset selection UI
+        const downloadBtn = document.getElementById('btn-download-measurement');
+        const deleteBtn = document.getElementById('btn-delete-measurement');
+        const vdsSelect = document.getElementById('vds-select');
+        const fileSelect = document.getElementById('file-select');
+
+        if (downloadBtn) downloadBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
+        if (vdsSelect) {
+            vdsSelect.innerHTML = '<option value="">Aguardando arquivo...</option>';
+            vdsSelect.disabled = true;
+        }
+        if (fileSelect) fileSelect.value = "";
+
+        // Clear global selection
+        currentSelectedFile = "";
+
+        // Reload File List
+        loadMeasurementList();
+
+    } catch (error) {
+        logErrorAndAlert("Erro ao deletar arquivo", error);
+    }
+});
+
+// Feature: Delete All Logic from Main Page
+document.getElementById('btn-delete-all')?.addEventListener('click', async () => {
+    // 1st Confirmation
+    if (!confirm("⚠️ ATENÇÃO ⚠️\n\nTem certeza que deseja DELETAR TODOS os arquivos de medição?\n\nEsta ação apagará todo o histórico de medidas salvas no ESP32.")) {
+        return;
+    }
+
+    // 2nd Confirmation (Irreversible)
+    if (!confirm("⛔ CONFIRMAÇÃO FINAL ⛔\n\nEsta ação é IRREVERSÍVEL.\nTodos os dados serão perdidos permanentemente.\n\nDeseja realmente continuar e apagar TUDO?")) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/files/delete-all', { method: 'POST' });
+        if (!response.ok) throw new Error("Falha ao deletar todos os arquivos");
+
+        showToast("Todos os arquivos foram deletados com sucesso.", 'success');
+
+        // Reset UI
+        currentCSVData = [];
+        loadMeasurementList();
+
+    } catch (error) {
+        logErrorAndAlert("Erro ao limpar armazenamento", error);
+    }
+});
 console.log('Scroll-to-change enabled on select elements');
 

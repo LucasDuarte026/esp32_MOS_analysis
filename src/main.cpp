@@ -145,6 +145,10 @@ void handleStartMeasurement()
   config.vds_end = doc["vds_end"] | 5.0f;
   config.vds_step = doc["vds_step"] | 0.05f;
   
+  // Sweep mode: "VGS" (default) or "VDS"
+  const char* sweepModeStr = doc["sweep_mode"] | "VGS";
+  config.sweep_mode = (strcmp(sweepModeStr, "VDS") == 0) ? SWEEP_VDS : SWEEP_VGS;
+  
   // Validate ranges
   if (config.vgs_start < 0 || config.vgs_end > 5.0) {
     LOG_ERROR("Invalid VGS range");
@@ -158,9 +162,10 @@ void handleStartMeasurement()
     return;
   }
   
-  LOG_INFO("Parsed config: VGS %.2f-%.2f step %.3f, VDS %.2f-%.2f step %.3f",
+  LOG_INFO("Parsed config: VGS %.2f-%.2f step %.3f, VDS %.2f-%.2f step %.3f, Mode=%s",
            config.vgs_start, config.vgs_end, config.vgs_step,
-           config.vds_start, config.vds_end, config.vds_step);
+           config.vds_start, config.vds_end, config.vds_step,
+           config.sweep_mode == SWEEP_VDS ? "VDS" : "VGS");
   LOG_INFO("  Rshunt=%.1f ohm, Settling=%dms, File=%s",
            config.rshunt, config.settling_ms, config.filename.c_str());
   

@@ -8,6 +8,12 @@
 
 // Hardware pin definitions moved to hardware_hal.h
 
+// Sweep mode: which variable is swept in the inner loop
+enum SweepMode {
+    SWEEP_VGS,  // Vary VGS for each fixed VDS (default, Curva Id x Vgs)
+    SWEEP_VDS   // Vary VDS for each fixed VGS (Curva Id x Vds)
+};
+
 struct SweepConfig
 {
     float vgs_start;
@@ -18,7 +24,8 @@ struct SweepConfig
     float vds_step;
     float rshunt;
     int settling_ms;
-    String filename; // Added filename to config
+    String filename;
+    SweepMode sweep_mode = SWEEP_VGS;  // Default to VGS sweep
 };
 
 struct DataPoint
@@ -87,6 +94,7 @@ private:
         float vt;
         float ss; // mV/dec
         float max_gm;
+        float rshunt; // Added to assist with parameter validity checks
         std::vector<float> vgs;
         std::vector<float> ids;
         std::vector<float> gm;
