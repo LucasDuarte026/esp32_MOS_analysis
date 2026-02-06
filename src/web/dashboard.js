@@ -318,6 +318,7 @@ async function pollProgress() {
         const progressSection = document.getElementById('progress-section');
         if (progressSection) {
             document.getElementById('progress-text').textContent = data.message || "Coletando...";
+            document.getElementById('progress-percent').textContent = `${data.progress}%`;
             document.getElementById('progress-fill').style.width = `${data.progress}%`;
         }
 
@@ -693,59 +694,197 @@ function calculateGmForData(data, sweepMode) {
     });
 }
 
-// Helper to calculate SS (d Vgs / d log10(Ids))
+// Helper to calculate SS (Subthreshold Swing) using derivative-based detection
+// SS = dVgs / d(log10(Ids)) in the subthreshold region
+// Method: Find region where d(log10(Ids))/dVgs is consistent (exponential behavior)
+// This approach doesn't rely on absolute current values - only on the slope consistency
 function calculateSSForData(data) {
     if (!data || data.length < 5) return;
 
-    // Group by curve (assume VGS mode for SS calculation usually)
+    // Group by VDS curve
     const curves = {};
-
     data.forEach(d => {
         const key = d.vds;
         if (!curves[key]) curves[key] = [];
         curves[key].push(d);
     });
 
-    Object.keys(curves).forEach(k => {
-        const curve = curves[k];
+    Object.keys(curves).forEach(vdsKey => {
+        const curve = curves[vdsKey];
         curve.sort((a, b) => a.vgs - b.vgs);
 
-        let bestSS = 0;
-
+        // STEP 1: Calculate d(log10(Ids))/dVgs for each point
+        // This is the inverse of SS: large values = steep slope = subthreshold region
+        const slopes = [];
         for (let i = 1; i < curve.length - 1; i++) {
-            const currentIds = Math.abs(curve[i].ids);
+            const prev = curve[i - 1];
+            const curr = curve[i];
+            const next = curve[i + 1];
 
-            // Allow wider range for calculation, filter later
-            if (currentIds > 1e-12) {
-                const prev = curve[i - 1];
-                const next = curve[i + 1];
+            const ids_prev = Math.abs(prev.ids);
+            const ids_next = Math.abs(next.ids);
 
-                const dVgs = next.vgs - prev.vgs;
-                const dLogIds = Math.log10(Math.abs(next.ids)) - Math.log10(Math.abs(prev.ids));
+            // Skip if current is too small (noise floor)
+            if (ids_prev < 1e-12 || ids_next < 1e-12) {
+                slopes.push({ idx: i, slope: 0, valid: false });
+                continue;
+            }
 
-                if (Math.abs(dVgs) > 1e-6 && Math.abs(dLogIds) > 1e-6) {
-                    const slope = dLogIds / dVgs; // decades per volt
-                    if (slope > 0.01) {
-                        const localSS = (1 / slope) * 1000; // mV/dec
-                        curve[i].ss_instant = localSS; // Store for plotting
+            const dVgs = next.vgs - prev.vgs;
+            const dLogIds = Math.log10(ids_next) - Math.log10(ids_prev);
 
-                        // Find min valid SS (steepest slope) in subthreshold region
-                        // Filter out noise: SS should be reasonable (e.g. > 20 mV/dec)
-                        if (currentIds < 1e-4) {
-                            if ((bestSS === 0 || localSS < bestSS) && localSS > 20) {
-                                bestSS = localSS;
-                            }
-                        }
-                    }
-                }
+            if (Math.abs(dVgs) > 1e-9 && dLogIds > 0.01) {
+                // Positive slope means current is increasing (subthreshold region)
+                const invSS = dLogIds / dVgs; // decades/V - inverse of SS
+                slopes.push({ idx: i, slope: invSS, dLogIds, dVgs, valid: true });
+            } else {
+                slopes.push({ idx: i, slope: 0, valid: false });
             }
         }
 
-        // Assign calculated min SS to all points
-        if (bestSS > 0) {
-            curve.forEach(p => p.ss = bestSS);
+        // STEP 2: Find the region with consistent positive slope (exponential region)
+        // Look for consecutive points with similar slope values
+        const validSlopes = slopes.filter(s => s.valid && s.slope > 0.5); // At least 0.5 dec/V
+
+        if (validSlopes.length < 3) {
+            // Not enough exponential points found
+            return;
+        }
+
+        // STEP 3: Find longest run of consistent slopes
+        // Slopes should be within 50% of each other to be "consistent"
+        let bestRun = [];
+        let currentRun = [validSlopes[0]];
+
+        for (let i = 1; i < validSlopes.length; i++) {
+            const prevSlope = currentRun[currentRun.length - 1].slope;
+            const currSlope = validSlopes[i].slope;
+            const ratio = currSlope / prevSlope;
+
+            // Check if slopes are consistent (within 2x of each other)
+            if (ratio > 0.5 && ratio < 2.0) {
+                currentRun.push(validSlopes[i]);
+            } else {
+                if (currentRun.length > bestRun.length) {
+                    bestRun = currentRun;
+                }
+                currentRun = [validSlopes[i]];
+            }
+        }
+        if (currentRun.length > bestRun.length) {
+            bestRun = currentRun;
+        }
+
+        if (bestRun.length < 3) {
+            return; // Not enough consistent exponential points
+        }
+
+        // STEP 4: Calculate SS from the best run using regression
+        const subthresholdPoints = bestRun.map(s => curve[s.idx]);
+        const ss = calculateSSByRegression(subthresholdPoints);
+
+        if (ss > 0 && ss < 2000) { // Valid SS range: 0 to 2000 mV/dec
+            curve.forEach(p => p.ss = ss);
+        }
+
+        // Also store instant SS for each point (for plotting)
+        for (let i = 1; i < curve.length - 1; i++) {
+            const prev = curve[i - 1];
+            const curr = curve[i];
+            const next = curve[i + 1];
+
+            const ids_prev = Math.abs(prev.ids);
+            const ids_next = Math.abs(next.ids);
+
+            if (ids_prev > 1e-12 && ids_next > 1e-12) {
+                const dVgs = next.vgs - prev.vgs;
+                const dLogIds = Math.log10(ids_next) - Math.log10(ids_prev);
+
+                if (Math.abs(dLogIds) > 0.01) { // At least 0.01 decade change
+                    curr.ss_instant = (dVgs / dLogIds) * 1000; // mV/dec
+                }
+            }
         }
     });
+}
+
+// Estimate Vt from Gm peak (simple method)
+function estimateVt(curve) {
+    let maxGm = 0;
+    let vtEstimate = 0;
+
+    for (let i = 1; i < curve.length - 1; i++) {
+        const gm = Math.abs(curve[i].gm || 0);
+        if (gm > maxGm) {
+            maxGm = gm;
+            vtEstimate = curve[i].vgs;
+        }
+    }
+
+    // Vt is typically slightly below the Gm peak
+    return vtEstimate > 0 ? vtEstimate - 0.1 : 1.0;
+}
+
+// Find region where Ids grows exponentially with Vgs
+function findExponentialRegion(curve) {
+    const points = [];
+
+    for (let i = 2; i < curve.length - 2; i++) {
+        const ids = Math.abs(curve[i].ids);
+        const ids_prev = Math.abs(curve[i - 1].ids);
+        const ids_next = Math.abs(curve[i + 1].ids);
+
+        // Check for exponential growth: ratio should be relatively constant
+        if (ids > 1e-11 && ids < 1e-5 && ids_prev > 1e-12 && ids_next > 1e-12) {
+            const ratio1 = ids / ids_prev;
+            const ratio2 = ids_next / ids;
+
+            // Both ratios should be > 1 (growing) and similar magnitude
+            if (ratio1 > 1.1 && ratio2 > 1.1 && ratio1 < 100 && ratio2 < 100) {
+                points.push(curve[i]);
+            }
+        }
+    }
+
+    return points;
+}
+
+// Calculate SS using linear regression: Vgs vs log10(Ids)
+// Returns SS in mV/decade
+function calculateSSByRegression(points) {
+    if (points.length < 2) return 0;
+
+    // Prepare data: x = log10(Ids), y = Vgs
+    const x = [];
+    const y = [];
+
+    points.forEach(p => {
+        const ids = Math.abs(p.ids);
+        if (ids > 1e-15) {
+            x.push(Math.log10(ids));
+            y.push(p.vgs);
+        }
+    });
+
+    if (x.length < 2) return 0;
+
+    // Linear regression: y = mx + b
+    // SS = m (slope) in V/decade, convert to mV/decade
+    const n = x.length;
+    const sumX = x.reduce((a, b) => a + b, 0);
+    const sumY = y.reduce((a, b) => a + b, 0);
+    const sumXY = x.reduce((acc, xi, i) => acc + xi * y[i], 0);
+    const sumX2 = x.reduce((acc, xi) => acc + xi * xi, 0);
+
+    const denominator = n * sumX2 - sumX * sumX;
+    if (Math.abs(denominator) < 1e-10) return 0;
+
+    const slope = (n * sumXY - sumX * sumY) / denominator; // V/decade
+
+    // SS should be positive (Vgs increases with log(Ids) in subthreshold)
+    const ss = slope * 1000; // Convert to mV/decade
+
+    return ss > 0 ? ss : 0;
 }
 
 

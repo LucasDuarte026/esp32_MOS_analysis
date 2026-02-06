@@ -473,51 +473,102 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
     auto max_gm_it = std::max_element(curve.gm.begin(), curve.gm.end());
     curve.max_gm = *max_gm_it;
     
-    // 4. SS = 1/Slope of Log(Ids) vs Vgs
-    // Region: Subthreshold - expanded range for different current levels
-    // Try multiple ranges to find valid subthreshold region
-    std::vector<float> x, y;
+    // 4. SS = 1/Slope of Log(Ids) vs Vgs - Using derivative-based detection
+    // Find region where d(log10(Ids))/dVgs is consistent (exponential behavior)
+    // This approach doesn't rely on hardcoded current values
     
-    // First try standard subthreshold region
-    for(size_t i=0; i<n; i++) {
-        float val = fabs(curve.ids[i]);
-        if(val > 1e-10 && val < 1e-5) {  // Expanded from 1e-6 to 1e-5
-            x.push_back(curve.vgs[i]);
-            y.push_back(log10(val));
+    // Step 1: Calculate slopes at each point
+    std::vector<float> slopes(n, 0.0f);
+    std::vector<bool> valid(n, false);
+    
+    for(size_t i=1; i<n-1; i++) {
+        float ids_prev = fabs(curve.ids[i-1]);
+        float ids_next = fabs(curve.ids[i+1]);
+        
+        // Skip if current is too small (noise floor)
+        if(ids_prev < 1e-12f || ids_next < 1e-12f) continue;
+        
+        float dVgs = curve.vgs[i+1] - curve.vgs[i-1];
+        float dLogIds = log10(ids_next) - log10(ids_prev);
+        
+        // Positive slope means current is increasing (subthreshold region)
+        if(fabs(dVgs) > 1e-9f && dLogIds > 0.01f) {
+            slopes[i] = dLogIds / dVgs; // decades/V (inverse of SS)
+            valid[i] = (slopes[i] > 0.5f); // At least 0.5 dec/V
         }
     }
     
-    // If not enough points, try wider range
-    if(x.size() < 5) {
-        x.clear();
-        y.clear();
-        for(size_t i=0; i<n; i++) {
+    // Step 2: Find longest run of consistent slopes
+    size_t bestStart = 0, bestLen = 0;
+    size_t currStart = 0, currLen = 0;
+    
+    for(size_t i=1; i<n; i++) {
+        if(!valid[i]) {
+            if(currLen > bestLen) {
+                bestStart = currStart;
+                bestLen = currLen;
+            }
+            currLen = 0;
+            currStart = i+1;
+            continue;
+        }
+        
+        if(currLen == 0 || !valid[i-1]) {
+            currStart = i;
+            currLen = 1;
+        } else {
+            float ratio = slopes[i] / slopes[i-1];
+            // Check if slopes are consistent (within 2x of each other)
+            if(ratio > 0.5f && ratio < 2.0f) {
+                currLen++;
+            } else {
+                if(currLen > bestLen) {
+                    bestStart = currStart;
+                    bestLen = currLen;
+                }
+                currStart = i;
+                currLen = 1;
+            }
+        }
+    }
+    if(currLen > bestLen) {
+        bestStart = currStart;
+        bestLen = currLen;
+    }
+    
+    // Step 3: Calculate SS from the best run using regression
+    if(bestLen >= 3) {
+        std::vector<float> x, y;
+        for(size_t i=bestStart; i<bestStart+bestLen && i<n; i++) {
             float val = fabs(curve.ids[i]);
-            if(val > 1e-9 && val < 1e-4) {
+            if(val > 1e-15f) {
                 x.push_back(curve.vgs[i]);
                 y.push_back(log10(val));
             }
         }
-    }
-    
-    if(x.size() > 5) {
-        // Linear regression
-        double sx=0, sy=0, sxy=0, sxx=0;
-        size_t N = x.size();
-        for(size_t i=0; i<N; i++) {
-            sx += x[i]; sy += y[i];
-            sxy += x[i]*y[i]; sxx += x[i]*x[i];
-        }
-        double denominator = N*sxx - sx*sx;
-        if(fabs(denominator) > 1e-9) {
-            double slope = (N*sxy - sx*sy) / denominator;
-            if(fabs(slope) > 1e-9) {
-                // SS = (1/slope) * 1000 mV/dec
-                curve.ss = (float)((1.0/fabs(slope)) * 1000.0);
+        
+        if(x.size() > 3) {
+            // Linear regression
+            double sx=0, sy=0, sxy=0, sxx=0;
+            size_t N = x.size();
+            for(size_t i=0; i<N; i++) {
+                sx += x[i]; sy += y[i];
+                sxy += x[i]*y[i]; sxx += x[i]*x[i];
+            }
+            double denominator = N*sxx - sx*sx;
+            if(fabs(denominator) > 1e-9) {
+                double slope = (N*sxy - sx*sy) / denominator;
+                if(fabs(slope) > 1e-9) {
+                    // SS = (1/slope) * 1000 mV/dec
+                    float ss_val = (float)((1.0/fabs(slope)) * 1000.0);
+                    if(ss_val > 0 && ss_val < 2000) { // Valid range
+                        curve.ss = ss_val;
+                    }
+                }
             }
         }
     }
-    // Note: SS remains 0.0 if not calculable (e.g., VDS sweep curves)
+    // Note: SS remains 0.0 if not calculable (e.g., no exponential region found)
 }
 
 void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
