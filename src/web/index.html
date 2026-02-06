@@ -299,6 +299,69 @@
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Storage Full Modal -->
+    <div id="storage-full-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content"
+            style="max-width: 500px; background: var(--bg-card); border-radius: 16px; padding: 0; overflow: hidden;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #f44336, #d32f2f); padding: 24px; text-align: center;">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="white" style="margin-bottom: 12px;">
+                    <path
+                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+                </svg>
+                <h2 style="color: white; margin: 0; font-size: 24px;">Armazenamento Cheio</h2>
+            </div>
+
+            <!-- Body -->
+            <div style="padding: 24px;">
+                <p style="color: var(--text-primary); font-size: 16px; margin-bottom: 16px; line-height: 1.6;">
+                    O limite de armazenamento (<strong>80%</strong>) foi atingido.
+                    Para iniciar uma nova medição, libere espaço removendo arquivos antigos.
+                </p>
+
+                <div
+                    style="background: rgba(255, 152, 0, 0.1); border-left: 4px solid #FF9800; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <h4 style="color: #FF9800; margin: 0 0 8px 0; font-size: 14px;">⚠️ ATENÇÃO</h4>
+                    <p style="color: var(--text-secondary); margin: 0; font-size: 13px;">
+                        Faça <strong>download</strong> dos arquivos importantes antes de apagá-los.
+                        Esta ação é <strong>irreversível</strong> e os dados não poderão ser recuperados.
+                    </p>
+                </div>
+
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                    <strong>O que fazer:</strong><br>
+                    1. Vá para a aba <em>Visualização</em> para baixar e remover arquivos individualmente<br>
+                    2. Ou use o botão abaixo para apagar todos os arquivos de uma vez
+                </p>
+
+                <!-- Actions -->
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <a href="/visualization" class="btn btn-primary"
+                        style="flex: 1; text-decoration: none; text-align: center; min-width: 140px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+                            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                        </svg>
+                        Gerenciar Arquivos
+                    </a>
+                    <button class="btn btn-danger" id="btn-modal-delete-all" style="flex: 1; min-width: 140px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" style="margin-right: 6px;">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                        </svg>
+                        Apagar Tudo
+                    </button>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="padding: 16px 24px; border-top: 1px solid var(--border-color); text-align: center;">
+                <button class="btn btn-secondary" id="btn-close-storage-modal" style="min-width: 120px;">
+                    Fechar
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="dashboard.js"></script>
 </body>
 

@@ -20,15 +20,30 @@ namespace {
     bool g_wifi_override = false;
     State g_saved_state = State::STANDBY;
     
+    // Configuration
+    LedConfig g_config;
+    
+    /**
+     * @brief Set LED output on configured pins
+     */
+    void setLedOutput(bool on) {
+        if (g_config.useBuiltinLed) {
+            digitalWrite(LED_BUILTIN_PIN, on ? HIGH : LOW);
+        }
+        if (g_config.useExternalLed) {
+            digitalWrite(LED_EXTERNAL_PIN, on ? HIGH : LOW);
+        }
+    }
+    
     /**
      * @brief Execute a pattern of N pulses followed by a pause
      * @param pulses Number of pulses to emit
      */
     void playPulsePattern(int pulses) {
         for (int i = 0; i < pulses; i++) {
-            digitalWrite(LED_STATUS_PIN, HIGH);
+            setLedOutput(true);
             vTaskDelay(pdMS_TO_TICKS(PULSE_ON_MS));
-            digitalWrite(LED_STATUS_PIN, LOW);
+            setLedOutput(false);
             
             // Gap between pulses (except after last)
             if (i < pulses - 1) {
@@ -50,9 +65,9 @@ namespace {
             switch (currentState) {
                 case State::STANDBY:
                     // 1Hz blink (0.5s on, 0.5s off)
-                    digitalWrite(LED_STATUS_PIN, HIGH);
+                    setLedOutput(true);
                     vTaskDelay(pdMS_TO_TICKS(STANDBY_PERIOD_MS / 2));
-                    digitalWrite(LED_STATUS_PIN, LOW);
+                    setLedOutput(false);
                     vTaskDelay(pdMS_TO_TICKS(STANDBY_PERIOD_MS / 2));
                     break;
                     
@@ -61,11 +76,16 @@ namespace {
                     playPulsePattern(2);
                     break;
                     
+                case State::READING_MOSFET:
+                    // 3 pulses + 2s pause (NEW pattern for ADC/DAC active)
+                    playPulsePattern(3);
+                    break;
+                    
                 case State::MEASURING:
-                    // Frenetic blink every 0.1s (reading + recording)
-                    digitalWrite(LED_STATUS_PIN, HIGH);
+                    // Frenetic blink every 0.1s (file writing)
+                    setLedOutput(true);
                     vTaskDelay(pdMS_TO_TICKS(RECORDING_PERIOD_MS / 2));
-                    digitalWrite(LED_STATUS_PIN, LOW);
+                    setLedOutput(false);
                     vTaskDelay(pdMS_TO_TICKS(RECORDING_PERIOD_MS / 2));
                     break;
             }
@@ -74,10 +94,19 @@ namespace {
     
 } // anonymous namespace
 
-void init() {
-    // Configure LED pin (built-in LED GPIO2)
-    pinMode(LED_STATUS_PIN, OUTPUT);
-    digitalWrite(LED_STATUS_PIN, LOW);
+void init(const LedConfig& config) {
+    g_config = config;
+    
+    // Configure LED pins
+    if (config.useBuiltinLed) {
+        pinMode(LED_BUILTIN_PIN, OUTPUT);
+        digitalWrite(LED_BUILTIN_PIN, LOW);
+    }
+    
+    if (config.useExternalLed) {
+        pinMode(LED_EXTERNAL_PIN, OUTPUT);
+        digitalWrite(LED_EXTERNAL_PIN, LOW);
+    }
     
     // Create LED control task
     BaseType_t result = xTaskCreatePinnedToCore(
@@ -91,7 +120,9 @@ void init() {
     );
     
     if (result == pdPASS) {
-        LOG_INFO("LED Status system initialized on GPIO%d (built-in LED)", LED_STATUS_PIN);
+        LOG_INFO("LED Status v2.0 initialized");
+        if (config.useBuiltinLed) LOG_INFO("  Built-in LED: GPIO%d", LED_BUILTIN_PIN);
+        if (config.useExternalLed) LOG_INFO("  External LED: GPIO%d", LED_EXTERNAL_PIN);
     } else {
         LOG_ERROR("Failed to create LED status task");
     }
@@ -100,19 +131,22 @@ void init() {
 void setState(State newState) {
     if (g_current_state != newState) {
         g_current_state = newState;
-        
-        const char* stateName = "UNKNOWN";
-        switch (newState) {
-            case State::STANDBY: stateName = "STANDBY"; break;
-            case State::WIFI_DISCONNECTED: stateName = "WIFI_DISCONNECTED"; break;
-            case State::MEASURING: stateName = "MEASURING"; break;
-        }
-        LOG_DEBUG("LED state changed to: %s", stateName);
+        LOG_DEBUG("LED state changed to: %s", getStateName(newState));
     }
 }
 
 State getState() {
     return g_current_state;
+}
+
+const char* getStateName(State state) {
+    switch (state) {
+        case State::STANDBY: return "STANDBY";
+        case State::WIFI_DISCONNECTED: return "WIFI_DISCONNECTED";
+        case State::READING_MOSFET: return "READING_MOSFET";
+        case State::MEASURING: return "MEASURING";
+        default: return "UNKNOWN";
+    }
 }
 
 void updateWiFiStatus(bool isConnected) {

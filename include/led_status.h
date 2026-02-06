@@ -4,21 +4,24 @@
 #include <Arduino.h>
 
 // ============================================================================
-// LED Status Indicator System
+// LED Status Indicator System v2.0
 // ============================================================================
-// Uses the built-in LED (GPIO2) with distinct blink patterns for
-// different system states. If LED stops blinking, system is frozen.
+// Supports both built-in LED (GPIO2) and external LED (GPIO14).
+// Distinct blink patterns for different system states.
+// If LED stops blinking, system is frozen.
 //
-// Patterns:
-//   - STANDBY:          1Hz continuous blink (0.5s on, 0.5s off)
+// Patterns (v2.0.0):
+//   - STANDBY:           1Hz continuous blink (0.5s on, 0.5s off)  
 //   - WIFI_DISCONNECTED: 2 fast pulses + 2s pause
-//   - MEASURING:         Frenetic blink every 0.1s (reading + recording)
+//   - READING_MOSFET:    3 fast pulses + 2s pause (ADC/DAC active)
+//   - MEASURING:         Frenetic blink every 0.1s (file writing)
 // ============================================================================
 
 namespace led_status {
 
-// Pin configuration - Built-in LED
-constexpr uint8_t LED_STATUS_PIN = 2;
+// Pin configuration
+constexpr uint8_t LED_BUILTIN_PIN = 2;      // Built-in LED (blue)
+constexpr uint8_t LED_EXTERNAL_PIN = 14;    // External LED (green) - NEW
 
 // Timing constants (milliseconds)
 constexpr uint32_t PULSE_ON_MS = 100;       // Duration of each pulse
@@ -33,14 +36,23 @@ constexpr uint32_t RECORDING_PERIOD_MS = 100; // Frenetic blink period
 enum class State {
     STANDBY,            // Normal operation - 1Hz blink (1s cycle)
     WIFI_DISCONNECTED,  // 2 pulses + 2s pause
-    MEASURING           // Frenetic blink every 0.1s (ADC/DAC + file writing)
+    READING_MOSFET,     // 3 pulses + 2s pause (NEW - ADC/DAC reading active)
+    MEASURING           // Frenetic blink every 0.1s (file writing)
+};
+
+/**
+ * @brief LED Configuration
+ */
+struct LedConfig {
+    bool useBuiltinLed = true;   // Use GPIO2 (blue LED)
+    bool useExternalLed = true;  // Use GPIO14 (green LED)
 };
 
 /**
  * @brief Initialize the LED status system
- * Must be called once during setup()
+ * @param config Configuration for which LEDs to use
  */
-void init();
+void init(const LedConfig& config = LedConfig());
 
 /**
  * @brief Set the current LED state/pattern
@@ -59,6 +71,11 @@ State getState();
  * Should be called periodically from main loop or monitoring task
  */
 void updateWiFiStatus(bool isConnected);
+
+/**
+ * @brief Get state name as string (for logging)
+ */
+const char* getStateName(State state);
 
 } // namespace led_status
 

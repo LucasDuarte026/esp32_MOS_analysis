@@ -66,9 +66,15 @@ bool MOSFETController::openMeasurementFile() {
 }
 
 void MOSFETController::closeMeasurementFile() {
+    LOG_DEBUG("closeMeasurementFile called, currentFile_ valid: %s", currentFile_ ? "YES" : "NO");
     if (currentFile_) {
+        size_t fileSize = currentFile_.size();
+        LOG_DEBUG("File size before close: %u bytes", (unsigned)fileSize);
+        currentFile_.flush();  // Ensure all data is written
         currentFile_.close();
-        LOG_INFO("File closed successfully");
+        LOG_INFO("File closed successfully (size: %u bytes)", (unsigned)fileSize);
+    } else {
+        LOG_WARN("closeMeasurementFile: currentFile_ was not open!");
     }
 }
 
@@ -278,50 +284,52 @@ void MOSFETController::performSweep()
     
     // Open file and write header FIRST
     String path = String(FileManager::MEASUREMENTS_DIR) + "/" + currentFilename_;
-    File file = FFat.open(path.c_str(), FILE_WRITE);
-    if (!file) {
+    LOG_DEBUG("Opening file for streaming: %s", path.c_str());
+    currentFile_ = FFat.open(path.c_str(), FILE_WRITE);
+    if (!currentFile_) {
         LOG_ERROR("Failed to open file for streaming: %s", path.c_str());
         hasError_ = true;
         errorMessage_ = "Failed to open file";
         return;
     }
+    LOG_DEBUG("File opened successfully. Handle valid: %s", currentFile_ ? "YES" : "NO");
     
     // Write header
     char lineBuf[256];
     int len;
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# MOSFET Characterization Data\n");
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     time_t now; time(&now);
     struct tm* timeinfo = localtime(&now);
     len = snprintf(lineBuf, sizeof(lineBuf), "# Date: %04d-%02d-%02d %02d:%02d:%02d\n",
         timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
         timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     // SWEEP MODE FLAG - critical for visualization
     len = snprintf(lineBuf, sizeof(lineBuf), "# Sweep Mode: %s\n", sweepVDS ? "VDS" : "VGS");
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n", config_.rshunt);
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# VDS Range: %.3f to %.3f V (step %.3f)\n",
         config_.vds_start, config_.vds_end, config_.vds_step);
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# VGS Range: %.3f to %.3f V (step %.3f)\n",
         config_.vgs_start, config_.vgs_end, config_.vgs_step);
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# Settling Time: %d ms\n", config_.settling_ms);
-    file.write((uint8_t*)lineBuf, len);
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     // Column Headers
     len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds,vgs,vsh,ids\n");
-    file.write((uint8_t*)lineBuf, len);
-    file.flush();
+    currentFile_.write((uint8_t*)lineBuf, len);
+    currentFile_.flush();
     
     LOG_INFO("Header written. Starting %s sweep...", sweepVDS ? "VDS" : "VGS");
     
@@ -348,7 +356,7 @@ void MOSFETController::performSweep()
                 // %.3f = VDS, VGS (3 decimals)
                 // %.6f = Vsh (6 decimals)
                 // %.6e = Ids (scientific)
-                file.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
+                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
                            (unsigned long)millis(), vds, vgs, vsh, ids);
                 
                 rowCount++;
@@ -356,13 +364,13 @@ void MOSFETController::performSweep()
                 progressPercent_ = (current_point * 100) / total_points;
                 
                 if (rowCount % 50 == 0) {
-                    file.flush();
+                    currentFile_.flush();
                     vTaskDelay(1);
                 }
             }
             
             // In VDS mode, parameters like Vt/SS/Gm are not strictly defined per VDS curve
-            file.flush();
+            currentFile_.flush();
             LOG_INFO("VGS=%.3fV streamed. Rows: %d", vgs, rowCount);
         }
     } else {
@@ -390,7 +398,7 @@ void MOSFETController::performSweep()
                 currentCurve.timestamps.push_back(millis());
                 
                 // Safe write
-                file.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
+                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
                            (unsigned long)millis(), vds, vgs, vsh, ids);
                 
                 rowCount++;
@@ -398,7 +406,7 @@ void MOSFETController::performSweep()
                 progressPercent_ = (current_point * 100) / total_points;
                 
                 if (rowCount % 50 == 0) {
-                    file.flush();
+                    currentFile_.flush();
                     vTaskDelay(1);
                 }
             }
@@ -407,21 +415,26 @@ void MOSFETController::performSweep()
             calculateCurveParams(currentCurve);
             
             // Write curve metadata as comment using printf for safety
-            file.printf("# VDS=%.3fV: Vt=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S\n", 
+            currentFile_.printf("# VDS=%.3fV: Vt=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S\n", 
                        vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
             
-            file.flush();
+            currentFile_.flush();
             LOG_INFO("VDS=%.3fV: Vt=%.3f, SS=%.1f mV/dec, MaxGm=%.2e", vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
         }
     }
     
-    // Final flush and close
-    file.flush();
-    file.close();
+    // Final flush - close is handled by closeMeasurementFile()
+    LOG_DEBUG("Before final flush: file valid=%s, size=%u, position=%u", 
+              currentFile_ ? "YES" : "NO",
+              currentFile_ ? (unsigned)currentFile_.size() : 0,
+              currentFile_ ? (unsigned)currentFile_.position() : 0);
+    currentFile_.flush();
     
     if (measuring_ && !cancelled_) {
         progressPercent_ = 100;
-        LOG_INFO("Streaming complete. Mode=%s, Total rows: %d", sweepVDS ? "VDS" : "VGS", rowCount);
+        LOG_INFO("Streaming complete. Mode=%s, Total rows: %d, File size: %u bytes", 
+                 sweepVDS ? "VDS" : "VGS", rowCount, 
+                 currentFile_ ? (unsigned)currentFile_.size() : 0);
     }
     
     // Shutdown DACs for safety

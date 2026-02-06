@@ -21,11 +21,21 @@ struct SaveResult {
 
 class WebServer; // Forward declaration
 
+// Storage information structure
+struct StorageInfo {
+    size_t totalBytes = 0;
+    size_t usedBytes = 0;
+    size_t freeBytes = 0;
+    float percentUsed = 0.0f;
+    bool isHealthy = false;
+};
+
 // File Manager class
 class FileManager {
 public:
     static const int MAX_FILES = 200;
     static const int WARNING_THRESHOLD = 150;
+    static constexpr float MAX_STORAGE_USAGE = 0.80f;  // 80% limit
     
     static bool init();
     static int countFiles();
@@ -40,6 +50,10 @@ public:
     static bool isValidFilename(const String& filename);
     
     static const char* MEASUREMENTS_DIR;
+    
+    // Storage management (v2.0.0)
+    static StorageInfo getStorageInfo();
+    static bool checkStorageAvailable();  // Returns false if >80% full
 
 private:
     static unsigned long extractTimestamp(const String& filename);

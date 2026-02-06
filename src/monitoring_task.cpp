@@ -1,11 +1,13 @@
 #include "monitoring_task.h"
+#include "debug_mode.h"
+#include "led_status.h"
+#include "file_manager.h"
 
 // FreeRTOS headers
 extern "C"
 {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 #include "freertos/semphr.h"
 }
 
@@ -22,82 +24,42 @@ namespace monitoring
         // Update interval
         constexpr uint32_t UPDATE_INTERVAL_MS = 500;
 
-        // ============================================================================
-        // FIXME: USB Serial Detection - REQUIRES FUTURE MAINTENANCE
-        // ============================================================================
-        // Current Status: NOT WORKING CORRECTLY - Shows "active" erroneously
-        // 
-        // Problem: ESP32 uses UART-based Serial (not native USB like ESP32-S2/S3)
-        //          Current detection method cannot reliably distinguish between:
-        //          1. USB cable with power only (no PC/serial monitor)
-        //          2. USB cable with active serial monitor connection
-        //
-        // Current Behavior: 
-        //   - Often shows "Comunicação USB Ativa" even when no serial monitor is open
-        //   - May show "Inativa" even when serial monitor IS connected
-        //
-        // TODO Future Solutions to Investigate:
-        //   1. Hardware approach: Add DTR/RTS line detection via GPIO
-        //   2. Software approach: Implement heartbeat protocol (PC must send periodic signal)
-        //   3. Alternative: Use ESP32-S2/S3 with native USB support
-        //   4. Simple fix: Remove USB detection entirely, assume WiFi-only operation
-        //
-        // For now: This feature is marked as "beta" / unreliable
-        // ============================================================================
+        // USB Serial Detection
+        // Note: This is still imperfect on ESP32 UART-based serial, but we can
+        // attempt detection through Serial activity
+        volatile bool g_usb_activity_detected = false;
+        volatile unsigned long g_last_serial_activity = 0;
         
-        static unsigned long last_check_time = 0;
-        static bool last_usb_state = false;
-        static int consecutive_checks = 0;
-        static unsigned long last_print_time = 0;
-        
-        bool detectUSB()
-        {
-            // Check every 1 second
-            unsigned long now = millis();
-            if (now - last_check_time < 1000) {
-                return last_usb_state;
-            }
-            last_check_time = now;
-            
-            // For ESP32 UART-based serial:
-            // Check if buffer is valid and draining
+        bool detectUSBSerial() {
+            // Method 1: Check if Serial is available and configured
             if (!Serial) return false;
-
-            int writeable_before = Serial.availableForWrite();
             
-            // Verify if we can write at all
-            if (writeable_before < 0) return false;
-
-            // Send a test byte (0x00) to check connection
-            // If connected, this should be consumed quickly by the UART hardware
-            Serial.write(0x00); 
+            // Method 2: Check for recent Serial activity (RX or TX)
+            // When Serial Monitor is open, there's typically some polling
+            // We can also check if Serial is available for writing
             
-            // Short delay to allow UART FIFO to process
-            vTaskDelay(pdMS_TO_TICKS(10)); 
+            // Check if Serial has been used recently
+            // This is a heuristic: if Serial.available() returns non-zero
+            // or if we've seen TX activity, assume USB is connected
+            unsigned long now = millis();
             
-            int writeable_after = Serial.availableForWrite();
+            // Consider USB active if we've had activity in last 5 seconds
+            // or if Serial appears functional
+            bool hasRecentActivity = (now - g_last_serial_activity) < 5000;
             
-            // Logic:
-            // If connected: Buffer should recover (space available increases or stays high)
-            // If disconnected/stalled: Buffer fills up and space available decreases
+            // Simple check: try to see if baudrate is configured (non-zero)
+            // and the port appears to be open
+            bool serialConfigured = Serial.baudRate() > 0;
             
-            // We assume connected if we have plenty of space
-            bool buffer_ok = (writeable_after > 100); 
-            
-            // Use hysteresis
-            if (buffer_ok == last_usb_state) {
-                consecutive_checks = 0;
-            } else {
-                consecutive_checks++;
-                if (consecutive_checks >= 3) {
-                    last_usb_state = buffer_ok;
-                    consecutive_checks = 0;
-                }
-            }
-            
-            return last_usb_state;
+            return serialConfigured && (hasRecentActivity || Serial.availableForWrite() > 0);
         }
-
+        
+        // Call this from Serial logging to track activity
+        void notifySerialActivity() {
+            g_last_serial_activity = millis();
+            g_usb_activity_detected = true;
+        }
+        
     } // namespace
 
     void begin()
@@ -111,6 +73,12 @@ namespace monitoring
 
         // Get chip ID (ESP32 MAC address)
         g_status.chip_id = ESP.getEfuseMac();
+        
+        // Mark initial serial activity
+        g_last_serial_activity = millis();
+        
+        // Initialize debug mode (GPIO12)
+        debug_mode::init();
 
         // Create monitoring task on core 0 (loop runs on core 1)
         xTaskCreatePinnedToCore(
@@ -126,8 +94,16 @@ namespace monitoring
         // Log initial diagnostic values
         float initTemp = temperatureRead();
         uint32_t initHeap = ESP.getFreeHeap();
-        Serial.printf("[MONITOR] Initial temp: %.1f°C (internal sensor), Free heap: %lu bytes\n", 
+        Serial.printf("[MONITOR] Initial temp: %.1f°C, Free heap: %lu bytes\n", 
                       initTemp, (unsigned long)initHeap);
+        
+        // Log storage info
+        StorageInfo storage = FileManager::getStorageInfo();
+        Serial.printf("[MONITOR] Storage: %.1f%% used (%u/%u bytes)\n",
+                      storage.percentUsed * 100.0f,
+                      (unsigned)storage.usedBytes,
+                      (unsigned)storage.totalBytes);
+        
         Serial.println("Monitoring task started");
     }
 
@@ -153,11 +129,17 @@ namespace monitoring
             // Read temperature using Arduino ESP32 native function
             float temp = temperatureRead(); // Returns temperature in Celsius
 
-            // Detect USB connection
-            bool usb = detectUSB();
-
             // Get free heap
             uint32_t heap = ESP.getFreeHeap();
+            
+            // Get storage info (v2.0.0)
+            StorageInfo storage = FileManager::getStorageInfo();
+            
+            // Detect USB Serial connection
+            bool usb = detectUSBSerial();
+
+            // Update debug mode state
+            debug_mode::update();
 
             // Update shared data
             if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
@@ -166,6 +148,12 @@ namespace monitoring
                 g_status.usb_connected = usb;
                 g_status.free_heap = heap;
                 g_status.last_update_ms = millis();
+                
+                // Storage info (v2.0.0)
+                g_status.storage_total = storage.totalBytes;
+                g_status.storage_used = storage.usedBytes;
+                g_status.storage_percent = storage.percentUsed;
+                
                 xSemaphoreGive(g_mutex);
             }
 

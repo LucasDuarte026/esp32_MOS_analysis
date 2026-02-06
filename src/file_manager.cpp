@@ -29,6 +29,38 @@ bool FileManager::init() {
     return true;
 }
 
+StorageInfo FileManager::getStorageInfo() {
+    StorageInfo info;
+    info.totalBytes = FFat.totalBytes();
+    info.usedBytes = FFat.usedBytes();
+    info.freeBytes = FFat.freeBytes();
+    
+    if (info.totalBytes > 0) {
+        info.percentUsed = (float)info.usedBytes / (float)info.totalBytes;
+        info.isHealthy = (info.percentUsed < MAX_STORAGE_USAGE);
+    }
+    
+    return info;
+}
+
+bool FileManager::checkStorageAvailable() {
+    StorageInfo info = getStorageInfo();
+    
+    if (!info.isHealthy) {
+        LOG_WARN("Storage limit exceeded: %.1f%% used (limit: %.0f%%)", 
+                 info.percentUsed * 100.0f, MAX_STORAGE_USAGE * 100.0f);
+        return false;
+    }
+    
+    // Also check minimum free space (at least 10KB for a new measurement)
+    if (info.freeBytes < 10240) {
+        LOG_WARN("Insufficient free space: %u bytes", (unsigned)info.freeBytes);
+        return false;
+    }
+    
+    return true;
+}
+
 // Security: Validate filename to prevent path traversal attacks
 bool FileManager::isValidFilename(const String& filename) {
     // Reject empty or too long filenames

@@ -152,12 +152,41 @@ let visibleCurves = {
     vt: false
 };
 
+// Scale type for Ids axis: 'linear' or 'log'
+let scaleType = 'linear';
+
 // Toggle buttons for visualization - properly update curve visibility
 document.querySelectorAll('.toggle-btn[data-curve]').forEach(btn => {
     btn.addEventListener('click', () => {
         const curveType = btn.dataset.curve;
         btn.classList.toggle('active');
         visibleCurves[curveType] = btn.classList.contains('active');
+        updatePlotsMultiCurve();
+    });
+});
+
+// Log/Linear scale toggle buttons
+document.querySelectorAll('.scale-btn[data-scale]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const newScale = btn.dataset.scale;
+        if (newScale === scaleType) return; // Already selected
+
+        scaleType = newScale;
+
+        // Update button states
+        document.querySelectorAll('.scale-btn').forEach(b => {
+            if (b.dataset.scale === scaleType) {
+                b.classList.add('active');
+                b.style.background = '#333';
+                b.style.color = '#fff';
+            } else {
+                b.classList.remove('active');
+                b.style.background = 'transparent';
+                b.style.color = '#888';
+            }
+        });
+
+        // Redraw plot with new scale
         updatePlotsMultiCurve();
     });
 });
@@ -298,6 +327,10 @@ document.getElementById('btn-start-collection')?.addEventListener('click', async
         if (response.status === 202) { // Accepted/Started
             // Start Polling
             pollProgress();
+        } else if (response.status === 507) {
+            // Storage Full - show modal
+            showStorageFullModal();
+            resetCollectionButton();
         } else {
             const result = await response.json();
             throw new Error(result.error || 'Falha ao iniciar');
@@ -694,10 +727,9 @@ function calculateGmForData(data, sweepMode) {
     });
 }
 
-// Helper to calculate SS (Subthreshold Swing) using derivative-based detection
-// SS = dVgs / d(log10(Ids)) in the subthreshold region
-// Method: Find region where d(log10(Ids))/dVgs is consistent (exponential behavior)
-// This approach doesn't rely on absolute current values - only on the slope consistency
+// Helper to calculate SS (Subthreshold Swing) using linear regression
+// SS = dVgs / d(log10(Ids)) in the subthreshold region (Vgs < Vt)
+// Method: Linear regression of Vgs vs log10(Ids) gives the slope directly as SS
 function calculateSSForData(data) {
     if (!data || data.length < 5) return;
 
@@ -1030,11 +1062,12 @@ function updatePlotsMultiCurve() {
             zerolinecolor: '#666'
         },
         yaxis: {
-            title: 'Ids (A)',
+            title: scaleType === 'log' ? 'Ids (A) - Log Scale' : 'Ids (A)',
             titlefont: { color: colors.ids },
             tickfont: { color: colors.ids },
             side: 'left',
-            gridcolor: '#333'
+            gridcolor: '#333',
+            type: scaleType  // 'linear' or 'log'
         },
         yaxis2: {
             title: 'Gm (S)',
@@ -1520,3 +1553,70 @@ document.getElementById('btn-delete-all')?.addEventListener('click', async () =>
 });
 console.log('Scroll-to-change enabled on select elements');
 
+// =============================================================================
+// Storage Full Modal Functions
+// =============================================================================
+
+function showStorageFullModal() {
+    const modal = document.getElementById('storage-full-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    } else {
+        // Fallback if modal doesn't exist (other pages)
+        alert('⚠️ Armazenamento Cheio!\n\nO limite de 80% foi atingido.\nLibere espaço removendo arquivos antigos na aba Visualização.');
+    }
+}
+
+function hideStorageFullModal() {
+    const modal = document.getElementById('storage-full-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Close modal button
+document.getElementById('btn-close-storage-modal')?.addEventListener('click', hideStorageFullModal);
+
+// Close modal on overlay click
+document.getElementById('storage-full-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'storage-full-modal') {
+        hideStorageFullModal();
+    }
+});
+
+// Delete All from modal
+document.getElementById('btn-modal-delete-all')?.addEventListener('click', async () => {
+    // First confirmation
+    if (!confirm("⚠️ ATENÇÃO ⚠️\n\nTem certeza que deseja DELETAR TODOS os arquivos de medição?\n\nEsta ação apagará todo o histórico de medidas salvas no ESP32.")) {
+        return;
+    }
+
+    // Second confirmation (Irreversible)
+    if (!confirm("⛔ CONFIRMAÇÃO FINAL ⛔\n\nEsta ação é IRREVERSÍVEL.\nTodos os dados serão perdidos permanentemente.\n\nDeseja realmente continuar e apagar TUDO?")) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/files/delete-all', { method: 'POST' });
+        if (!response.ok) throw new Error("Falha ao deletar todos os arquivos");
+
+        showToast("✅ Todos os arquivos foram deletados com sucesso.", 'success');
+        hideStorageFullModal();
+
+        // Reset UI
+        currentCSVData = [];
+        loadMeasurementList();
+
+    } catch (error) {
+        showToast("❌ Erro ao limpar armazenamento: " + error.message, 'error');
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        hideStorageFullModal();
+    }
+});
+
+console.log('Storage Full Modal initialized');
