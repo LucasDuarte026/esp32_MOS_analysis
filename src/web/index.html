@@ -128,10 +128,11 @@
                                     <div class="form-group">
                                         <label for="vds-step">Passo VDS (V)</label>
                                         <select id="vds-step" class="select-field">
-                                            <option value="0.05" selected>0.05V (alta resolução)</option>
-                                            <option value="0.10">0.10V (balanceado)</option>
-                                            <option value="0.15">0.15V</option>
-                                            <option value="0.20">0.20V (rápido)</option>
+                                            <option value="0.010">0.010V (alta precisão)</option>
+                                            <option value="0.050" selected>0.050V (alta resolução)</option>
+                                            <option value="0.100">0.100V (balanceado)</option>
+                                            <option value="0.150">0.150V</option>
+                                            <option value="0.200">0.200V (rápido)</option>
                                         </select>
                                         <small class="helper-text">Incremento de tensão VDS no sweep</small>
                                     </div>
@@ -163,12 +164,12 @@
                                     <div class="form-group">
                                         <label for="vgs-step">Passo VGS (V)</label>
                                         <select id="vgs-step" class="select-field">
-                                            <option value="0.01">0.01V (precisão)</option>
-                                            <option value="0.05" selected>0.05V (padrão)</option>
-                                            <option value="0.1">0.10V</option>
-                                            <option value="0.15">0.15V</option>
-                                            <option value="0.2">0.20V</option>
-                                            <option value="0.25">0.25V</option>
+                                            <option value="0.010">0.010V (alta precisão)</option>
+                                            <option value="0.050" selected>0.050V (padrão)</option>
+                                            <option value="0.100">0.100V</option>
+                                            <option value="0.150">0.150V</option>
+                                            <option value="0.200">0.200V</option>
+                                            <option value="0.250">0.250V (rápido)</option>
                                         </select>
                                         <small class="helper-text">Incremento de tensão VGS (recomendado: 0.05V)</small>
                                     </div>
@@ -193,6 +194,45 @@
                                             step="1" value="5">
                                         <small class="helper-text">Tempo entre escrita DAC e leitura ADC (recomendado:
                                             5ms)</small>
+                                    </div>
+
+                                    <!-- Oversampling Toggle -->
+                                    <div class="form-group">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <label for="oversampling-toggle" style="margin: 0;">Oversampling ADC</label>
+                                            <span class="tooltip-trigger" tabindex="0">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                                    stroke="#888" stroke-width="2">
+                                                    <circle cx="12" cy="12" r="10" />
+                                                    <path d="M12 16v-4M12 8h.01" />
+                                                </svg>
+                                                <div class="tooltip-content">
+                                                    <strong>O que é Oversampling?</strong><br><br>
+                                                    Técnica que melhora a precisão do ADC fazendo múltiplas leituras
+                                                    (64x) e calculando a média.<br><br>
+                                                    <strong>Vantagens:</strong><br>
+                                                    • Reduz ruído nas medições<br>
+                                                    • Aumenta resolução efetiva de ~10 para ~15 bits<br>
+                                                    • Leituras mais estáveis e reproduzíveis<br><br>
+                                                    <strong>Desvantagem:</strong><br>
+                                                    • Cada ponto leva ~10ms (mais lento)<br><br>
+                                                    <strong>⚠️ Recomendado:</strong> Manter ativado ao usar ADC/DAC
+                                                    nativos do ESP32, que são mais ruidosos que conversores externos.
+                                                </div>
+                                            </span>
+                                        </div>
+                                        <div class="sweep-mode-toggle" style="justify-content: flex-start;">
+                                            <span class="mode-label mode-dimmed"
+                                                id="oversampling-off-label">Desativado</span>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="oversampling-toggle" checked>
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                            <span class="mode-label mode-active" id="oversampling-on-label">Ativado
+                                                (64x)</span>
+                                        </div>
+                                        <small class="helper-text">Desative para medições mais rápidas (menos
+                                            precisas)</small>
                                     </div>
 
                                     <div class="form-group">

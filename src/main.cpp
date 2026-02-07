@@ -15,6 +15,7 @@
 #include "log_buffer.h"
 #include "led_status.h"
 #include "debug_mode.h"
+#include "hardware_hal.h"
 
 #include "file_manager.h"
 #include <FFat.h>
@@ -137,6 +138,12 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   
   const char* sweepModeStr = doc["sweep_mode"] | "VGS";
   config.sweep_mode = (strcmp(sweepModeStr, "VDS") == 0) ? SWEEP_VDS : SWEEP_VGS;
+  
+  // Oversampling configuration (1 = disabled, 64 = default)
+  uint16_t oversampling = doc["oversampling"] | 64;
+  config.oversampling = oversampling;
+  hal::HardwareHAL::instance().getShuntADC().setOversamplingCount(oversampling);
+  LOG_INFO("ADC oversampling set to %d (%s)", oversampling, oversampling > 1 ? "enabled" : "disabled");
   
   // Validate
   if (config.vgs_start < 0 || config.vgs_end > 5.0) {

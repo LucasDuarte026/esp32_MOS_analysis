@@ -327,12 +327,20 @@ void MOSFETController::performSweep()
     len = snprintf(lineBuf, sizeof(lineBuf), "# Settling Time: %d ms\n", config_.settling_ms);
     currentFile_.write((uint8_t*)lineBuf, len);
     
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Oversampling: %s (%dx)\n", 
+        config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
+    currentFile_.write((uint8_t*)lineBuf, len);
+    
     // Column Headers
     len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds,vgs,vsh,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
-    LOG_INFO("Header written. Starting %s sweep...", sweepVDS ? "VDS" : "VGS");
+    LOG_INFO("Starting %s sweep - Oversampling: %s (%dx), Settling: %dms", 
+        sweepVDS ? "VDS" : "VGS",
+        config_.oversampling > 1 ? "ON" : "OFF", 
+        config_.oversampling, 
+        config_.settling_ms);
     
     int rowCount = 0;
     

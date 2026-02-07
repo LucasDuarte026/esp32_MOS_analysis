@@ -24,6 +24,7 @@ struct SweepConfig
     float vds_step;
     float rshunt;
     int settling_ms;
+    uint16_t oversampling = 64;  // ADC oversampling count (1 = disabled, 64 = enabled)
     String filename;
     SweepMode sweep_mode = SWEEP_VGS;  // Default to VGS sweep
 };

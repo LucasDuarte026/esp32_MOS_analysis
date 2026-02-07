@@ -896,3 +896,56 @@ select.select-field::-webkit-scrollbar-thumb:hover {
         transform: translateY(0);
     }
 }
+
+/* Tooltip Styles */
+.tooltip-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+}
+
+.tooltip-trigger svg {
+    transition: stroke 0.2s ease;
+}
+
+.tooltip-trigger:hover svg {
+    stroke: var(--accent-cyan);
+}
+
+.tooltip-content {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.tooltip-content::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 8px solid transparent;
+    border-top-color: var(--bg-card);
+}
+
+.tooltip-trigger:hover .tooltip-content,
+.tooltip-trigger:focus .tooltip-content {
+    opacity: 1;
+    visibility: visible;
+}

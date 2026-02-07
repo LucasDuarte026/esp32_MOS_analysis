@@ -121,6 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const sweepModeToggle = document.getElementById('sweep-mode-toggle');
         const sweepMode = sweepModeToggle && sweepModeToggle.checked ? 'VDS' : 'VGS';
 
+        // Get oversampling setting
+        const oversamplingToggle = document.getElementById('oversampling-toggle');
+        const oversamplingEnabled = oversamplingToggle ? oversamplingToggle.checked : true;
+
         const config = {
             vgs_start: vgsStart,
             vgs_end: vgsEnd,
@@ -130,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
             vds_step: vdsStep,
             rshunt: rshunt,
             settling_ms: settlingTime || 5,
+            oversampling: oversamplingEnabled ? 64 : 1,  // 64x or 1x (disabled)
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
             timestamp: Math.floor(Date.now() / 1000)
@@ -324,6 +329,26 @@ document.getElementById('sweep-mode-toggle')?.addEventListener('change', (e) => 
         vdsLabel.classList.add('mode-dimmed');
         vdsLabel.classList.remove('mode-active');
         if (descEl) descEl.textContent = 'Varia VGS para cada VDS fixo (padrão)';
+    }
+});
+
+// Oversampling Toggle - update visual state
+document.getElementById('oversampling-toggle')?.addEventListener('change', (e) => {
+    const offLabel = document.getElementById('oversampling-off-label');
+    const onLabel = document.getElementById('oversampling-on-label');
+
+    if (e.target.checked) {
+        // Oversampling ON
+        offLabel.classList.remove('mode-active');
+        offLabel.classList.add('mode-dimmed');
+        onLabel.classList.remove('mode-dimmed');
+        onLabel.classList.add('mode-active');
+    } else {
+        // Oversampling OFF
+        offLabel.classList.add('mode-active');
+        offLabel.classList.remove('mode-dimmed');
+        onLabel.classList.add('mode-dimmed');
+        onLabel.classList.remove('mode-active');
     }
 });
 

@@ -12,3 +12,4 @@ wifi_credentials_local.h
 include/secrets.h
 ref/
 .agent/
+funcionalidades.txt
