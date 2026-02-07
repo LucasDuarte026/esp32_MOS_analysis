@@ -20,7 +20,9 @@ files_to_embed = {
     "visualization": WEB_DIR / "visualization.html",
     "email": WEB_DIR / "email.html",
     "css": WEB_DIR / "dashboard.css",
-    "js": WEB_DIR / "dashboard.js",
+    "core_js": WEB_DIR / "core.js",
+    "collection_js": WEB_DIR / "collection.js",
+    "viz_js": WEB_DIR / "visualization.js",
 }
 
 # Check all files exist
@@ -35,13 +37,17 @@ index_content = files_to_embed["index"].read_text(encoding="utf-8")
 viz_content = files_to_embed["visualization"].read_text(encoding="utf-8")
 email_content = files_to_embed["email"].read_text(encoding="utf-8")
 css_content = files_to_embed["css"].read_text(encoding="utf-8")
-js_content = files_to_embed["js"].read_text(encoding="utf-8")
+core_js_content = files_to_embed["core_js"].read_text(encoding="utf-8")
+collection_js_content = files_to_embed["collection_js"].read_text(encoding="utf-8")
+viz_js_content = files_to_embed["viz_js"].read_text(encoding="utf-8")
 
 index_literal = json.dumps(index_content)
 viz_literal = json.dumps(viz_content)
 email_literal = json.dumps(email_content)
 css_literal = json.dumps(css_content)
-js_literal = json.dumps(js_content)
+core_js_literal = json.dumps(core_js_content)
+collection_js_literal = json.dumps(collection_js_content)
+viz_js_literal = json.dumps(viz_js_content)
 
 header = f"""#pragma once
 #include <pgmspace.h>
@@ -51,7 +57,9 @@ static const char kIndexHtml[] PROGMEM = {index_literal};
 static const char kVisualizationHtml[] PROGMEM = {viz_literal};
 static const char kEmailHtml[] PROGMEM = {email_literal};
 static const char kDashboardCss[] PROGMEM = {css_literal};
-static const char kDashboardJs[] PROGMEM = {js_literal};
+static const char kCoreJs[] PROGMEM = {core_js_literal};
+static const char kCollectionJs[] PROGMEM = {collection_js_literal};
+static const char kVisualizationJs[] PROGMEM = {viz_js_literal};
 }}
 """
 

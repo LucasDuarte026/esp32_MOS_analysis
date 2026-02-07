@@ -11,3 +11,4 @@ platformio_override.ini
 wifi_credentials_local.h
 include/secrets.h
 ref/
+.agent/

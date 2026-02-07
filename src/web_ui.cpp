@@ -8,36 +8,62 @@ namespace webui
 {
 
 #ifdef USE_ASYNC_WEBSERVER
+// Helper: Create chunked response for PROGMEM content
+// This avoids allocating entire content in RAM at once
+static void sendProgmemChunked(AsyncWebServerRequest *request, const char *contentType, const char *progmemContent)
+{
+  size_t contentLen = strlen_P(progmemContent);
+
+  AsyncWebServerResponse *response = request->beginChunkedResponse(
+      contentType,
+      [progmemContent, contentLen](uint8_t *buffer, size_t maxLen, size_t index) -> size_t
+      {
+        if (index >= contentLen)
+          return 0; // Done
+
+        size_t remaining = contentLen - index;
+        size_t toSend = remaining < maxLen ? remaining : maxLen;
+        memcpy_P(buffer, progmemContent + index, toSend);
+        return toSend;
+      });
+
+  request->send(response);
+}
+
 // ESPAsyncWebServer version - use chunked response for large PROGMEM strings
 void sendIndex(AsyncWebServerRequest *request)
 {
-  // Use beginResponse_P for PROGMEM data - avoids copying to RAM
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", kIndexHtml);
-  request->send(response);
+  sendProgmemChunked(request, "text/html", kIndexHtml);
 }
 
 void sendVisualization(AsyncWebServerRequest *request)
 {
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", kVisualizationHtml);
-  request->send(response);
+  sendProgmemChunked(request, "text/html", kVisualizationHtml);
 }
 
 void sendEmail(AsyncWebServerRequest *request)
 {
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", kEmailHtml);
-  request->send(response);
+  sendProgmemChunked(request, "text/html", kEmailHtml);
 }
 
 void sendCSS(AsyncWebServerRequest *request)
 {
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/css", kDashboardCss);
-  request->send(response);
+  sendProgmemChunked(request, "text/css", kDashboardCss);
 }
 
-void sendJS(AsyncWebServerRequest *request)
+void sendCoreJs(AsyncWebServerRequest *request)
 {
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "application/javascript", kDashboardJs);
-  request->send(response);
+  sendProgmemChunked(request, "application/javascript", kCoreJs);
+}
+
+void sendCollectionJs(AsyncWebServerRequest *request)
+{
+  sendProgmemChunked(request, "application/javascript", kCollectionJs);
+}
+
+void sendVisualizationJs(AsyncWebServerRequest *request)
+{
+  sendProgmemChunked(request, "application/javascript", kVisualizationJs);
 }
 
 #else
@@ -62,9 +88,19 @@ void sendCSS(WebServer &server)
   server.send_P(200, "text/css", kDashboardCss);
 }
 
-void sendJS(WebServer &server)
+void sendCoreJs(WebServer &server)
 {
-  server.send_P(200, "application/javascript", kDashboardJs);
+  server.send_P(200, "application/javascript", kCoreJs);
+}
+
+void sendCollectionJs(WebServer &server)
+{
+  server.send_P(200, "application/javascript", kCollectionJs);
+}
+
+void sendVisualizationJs(WebServer &server)
+{
+  server.send_P(200, "application/javascript", kVisualizationJs);
 }
 #endif
 

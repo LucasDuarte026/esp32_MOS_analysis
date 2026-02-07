@@ -100,6 +100,10 @@ private:
         std::vector<float> gm;
         std::vector<float> vsh;
         std::vector<uint32_t> timestamps;
+        
+        // SS Tangent Line (for visualization)
+        float ss_x1 = 0, ss_y1 = 0;
+        float ss_x2 = 0, ss_y2 = 0;
     };
     
     // Analysis helpers

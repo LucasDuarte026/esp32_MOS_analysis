@@ -73,10 +73,7 @@ void handleCSS(AsyncWebServerRequest *request)
   webui::sendCSS(request);
 }
 
-void handleJS(AsyncWebServerRequest *request)
-{
-  webui::sendJS(request);
-}
+
 
 void handleCORS(AsyncWebServerRequest *request)
 {
@@ -487,7 +484,9 @@ void setup()
   server.on("/visualization", HTTP_GET, handleVisualization);
   server.on("/email", HTTP_GET, handleEmail);
   server.on("/dashboard.css", HTTP_GET, handleCSS);
-  server.on("/dashboard.js", HTTP_GET, handleJS);
+  server.on("/core.js", HTTP_GET, webui::sendCoreJs);
+  server.on("/collection.js", HTTP_GET, webui::sendCollectionJs);
+  server.on("/visualization.js", HTTP_GET, webui::sendVisualizationJs);
   
   // API endpoints
   server.on("/api/status", HTTP_GET, handleStatus);
