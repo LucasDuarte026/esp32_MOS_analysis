@@ -13,3 +13,4 @@ include/secrets.h
 ref/
 .agent/
 funcionalidades.txt
+test_data/

@@ -231,13 +231,16 @@ SSResult calculateSS(
     
     size_t n = ids.size();
     
+    // Step 0: Smooth IDs to reduce noise
+    std::vector<float> idsSmooth = movingAverageSmooth(ids, 5);
+    
     // Step 1: Calculate local slopes (d(log10(Ids))/dVgs)
     std::vector<float> slopes(n, 0.0f);
     std::vector<bool> valid(n, false);
     
     for (size_t i = 1; i < n - 1; i++) {
-        float idsPrev = fabs(ids[i - 1]);
-        float idsNext = fabs(ids[i + 1]);
+        float idsPrev = fabs(idsSmooth[i - 1]);
+        float idsNext = fabs(idsSmooth[i + 1]);
         
         // Skip near-zero currents (noise floor)
         if (idsPrev < 1e-12f || idsNext < 1e-12f) continue;

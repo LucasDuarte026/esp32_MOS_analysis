@@ -281,6 +281,14 @@ select.select-field::-webkit-scrollbar-thumb:hover {
     gap: 8px;
 }
 
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+    pointer-events: none;
+}
+
 .btn-primary {
     background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
     color: white;

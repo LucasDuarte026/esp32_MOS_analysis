@@ -3,9 +3,11 @@
 #include "file_manager.h"
 #include "led_status.h"
 #include "math_engine.h"
+#include "version.h"
 #include <sys/time.h>
 #include <time.h>
 #include <cstdio>
+
 
 // Buffer size for batch writing (2KB chunks)
 static const size_t WRITE_BUFFER_SIZE = 2048;
@@ -329,6 +331,9 @@ void MOSFETController::performSweep()
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# Oversampling: %s (%dx)\n", 
         config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
+    currentFile_.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Firmware: %s\n", SOFTWARE_VERSION);
     currentFile_.write((uint8_t*)lineBuf, len);
     
     // Column Headers

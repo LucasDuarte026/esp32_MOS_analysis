@@ -102,11 +102,16 @@ async function handleFileSelection(e) {
         return;
     }
 
-    if (downloadBtn) downloadBtn.disabled = false;
-    if (deleteBtn) deleteBtn.disabled = false;
+    if (downloadBtn) downloadBtn.disabled = true;  // Disable during load
+    if (deleteBtn) deleteBtn.disabled = true;      // Disable during load
+
+    dbg('UI', `Iniciando carregamento: ${selectedFile}`);
+    console.log('Download button disabled for loading');
+
     if (vdsSelect) {
         vdsSelect.disabled = true;
         vdsSelect.innerHTML = '<option value="">Carregando dados...</option>';
+        vdsSelect.style.color = '#ff5555'; // RED COLOR for loading state
     }
 
     document.body.style.cursor = 'wait';
@@ -128,6 +133,7 @@ async function handleFileSelection(e) {
 
         // Populate Curve Selector
         if (vdsSelect) {
+            vdsSelect.style.color = ''; // Reset to default color
             vdsSelect.innerHTML = '';
             uniqueVDSValues.forEach(val => {
                 const option = document.createElement('option');
@@ -511,6 +517,12 @@ function updatePlotsMultiCurve() {
 
     Plotly.newPlot('plot-container', traces, layout);
     updateMetrics(plotData, meta);
+
+    // Enable buttons after successful plot
+    const downloadBtn = document.getElementById('btn-download-measurement');
+    const deleteBtn = document.getElementById('btn-delete-measurement');
+    if (downloadBtn) downloadBtn.disabled = false;
+    if (deleteBtn) deleteBtn.disabled = false;
 }
 
 function updateMetrics(plotData, meta) {
