@@ -124,6 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Get oversampling setting
         const oversamplingToggle = document.getElementById('oversampling-toggle');
         const oversamplingEnabled = oversamplingToggle ? oversamplingToggle.checked : true;
+        const oversamplingFactorEl = document.getElementById('oversampling-factor');
+        const oversamplingFactor = oversamplingEnabled
+            ? parseInt(oversamplingFactorEl ? oversamplingFactorEl.value : '64')
+            : 1;
 
         const config = {
             vgs_start: vgsStart,
@@ -134,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
             vds_step: vdsStep,
             rshunt: rshunt,
             settling_ms: settlingTime || 5,
-            oversampling: oversamplingEnabled ? 64 : 1,  // 64x or 1x (disabled)
+            oversampling: oversamplingFactor,
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
             timestamp: Math.floor(Date.now() / 1000)
@@ -332,10 +336,11 @@ document.getElementById('sweep-mode-toggle')?.addEventListener('change', (e) => 
     }
 });
 
-// Oversampling Toggle - update visual state
+// Oversampling Toggle - update visual state and show/hide factor dropdown
 document.getElementById('oversampling-toggle')?.addEventListener('change', (e) => {
     const offLabel = document.getElementById('oversampling-off-label');
     const onLabel = document.getElementById('oversampling-on-label');
+    const factorGroup = document.getElementById('oversampling-factor-group');
 
     if (e.target.checked) {
         // Oversampling ON
@@ -343,14 +348,32 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
         offLabel.classList.add('mode-dimmed');
         onLabel.classList.remove('mode-dimmed');
         onLabel.classList.add('mode-active');
+        if (factorGroup) factorGroup.style.display = 'block';
     } else {
         // Oversampling OFF
         offLabel.classList.add('mode-active');
         offLabel.classList.remove('mode-dimmed');
         onLabel.classList.add('mode-dimmed');
         onLabel.classList.remove('mode-active');
+        if (factorGroup) factorGroup.style.display = 'none';
     }
 });
+
+// Oversampling Factor dropdown — update time hint
+(function () {
+    const ADC_US_PER_SAMPLE = 15; // ~15µs per analogRead on ESP32
+    function updateOversamplingHint() {
+        const sel = document.getElementById('oversampling-factor');
+        const hint = document.getElementById('oversampling-time-hint');
+        if (!sel || !hint) return;
+        const n = parseInt(sel.value);
+        const ms = ((n * ADC_US_PER_SAMPLE) / 1000).toFixed(2);
+        hint.textContent = `~${ms} ms de leitura por ponto (${n} amostras)`;
+    }
+    document.getElementById('oversampling-factor')?.addEventListener('change', updateOversamplingHint);
+    // Run once on load to set initial hint
+    document.addEventListener('DOMContentLoaded', updateOversamplingHint);
+})();
 
 // =============================================================================
 // Storage & Delete All Logic

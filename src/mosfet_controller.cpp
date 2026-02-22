@@ -397,8 +397,11 @@ void MOSFETController::performSweep()
             currentCurve.vds = vds;
             currentCurve.rshunt = rshunt; // Pass Rshunt for SS context if needed
             
+            // R1 FIX: set VDS once per curve, not on every inner VGS iteration
+            hal::setVDS(vds);
+            vTaskDelay(pdMS_TO_TICKS(settling * 3)); // longer settling on VDS transition
+            
             for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
-                hal::setVDS(vds);
                 hal::setVGS(vgs);
                 vTaskDelay(pdMS_TO_TICKS(settling));
                 

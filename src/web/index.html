@@ -129,7 +129,8 @@
                                         <label for="vds-step">Passo VDS (V)</label>
                                         <select id="vds-step" class="select-field">
                                             <option value="0.010">0.010V (alta precisão)</option>
-                                            <option value="0.050" selected>0.050V (alta resolução)</option>
+                                            <option value="0.025" selected>0.025V</option>
+                                            <option value="0.050">0.050V</option>
                                             <option value="0.100">0.100V (balanceado)</option>
                                             <option value="0.150">0.150V</option>
                                             <option value="0.200">0.200V (rápido)</option>
@@ -165,7 +166,8 @@
                                         <label for="vgs-step">Passo VGS (V)</label>
                                         <select id="vgs-step" class="select-field">
                                             <option value="0.010">0.010V (alta precisão)</option>
-                                            <option value="0.050" selected>0.050V (padrão)</option>
+                                            <option value="0.025" selected>0.025V</option>
+                                            <option value="0.050">0.050V</option>
                                             <option value="0.100">0.100V</option>
                                             <option value="0.150">0.150V</option>
                                             <option value="0.200">0.200V</option>
@@ -191,9 +193,9 @@
                                     <div class="form-group">
                                         <label for="settling-time">Tempo de Estabilização (ms)</label>
                                         <input type="number" id="settling-time" class="input-field" min="1" max="1000"
-                                            step="1" value="5">
+                                            step="1" value="1">
                                         <small class="helper-text">Tempo entre escrita DAC e leitura ADC (recomendado:
-                                            5ms)</small>
+                                            1ms)</small>
                                     </div>
 
                                     <!-- Oversampling Toggle -->
@@ -209,13 +211,14 @@
                                                 <div class="tooltip-content">
                                                     <strong>O que é Oversampling?</strong><br><br>
                                                     Técnica que melhora a precisão do ADC fazendo múltiplas leituras
-                                                    (64x) e calculando a média.<br><br>
+                                                    e calculando a média. Maior fator = mais preciso, mais
+                                                    lento.<br><br>
                                                     <strong>Vantagens:</strong><br>
                                                     • Reduz ruído nas medições<br>
-                                                    • Aumenta resolução efetiva de ~10 para ~15 bits<br>
+                                                    • Aumenta resolução efetiva do ADC<br>
                                                     • Leituras mais estáveis e reproduzíveis<br><br>
                                                     <strong>Desvantagem:</strong><br>
-                                                    • Cada ponto leva ~10ms (mais lento)<br><br>
+                                                    • Aumenta o tempo por ponto linearmente<br><br>
                                                     <strong>⚠️ Recomendado:</strong> Manter ativado ao usar ADC/DAC
                                                     nativos do ESP32, que são mais ruidosos que conversores externos.
                                                 </div>
@@ -228,11 +231,27 @@
                                                 <input type="checkbox" id="oversampling-toggle" checked>
                                                 <span class="toggle-slider"></span>
                                             </label>
-                                            <span class="mode-label mode-active" id="oversampling-on-label">Ativado
-                                                (64x)</span>
+                                            <span class="mode-label mode-active"
+                                                id="oversampling-on-label">Ativado</span>
                                         </div>
-                                        <small class="helper-text">Desative para medições mais rápidas (menos
-                                            precisas)</small>
+                                        <!-- Oversampling factor dropdown — shown only when toggle is ON -->
+                                        <div id="oversampling-factor-group" style="margin-top: 10px;">
+                                            <label for="oversampling-factor"
+                                                style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Fator
+                                                de Oversampling</label>
+                                            <select id="oversampling-factor" class="select-field">
+                                                <option value="2">× 2 &nbsp;(mais rápido)</option>
+                                                <option value="4">× 4</option>
+                                                <option value="8">× 8</option>
+                                                <option value="16">× 16</option>
+                                                <option value="32">× 32</option>
+                                                <option value="64" selected>× 64 &nbsp;(padrão — mais preciso)</option>
+                                            </select>
+                                            <small class="helper-text" id="oversampling-time-hint">~1.0 ms de leitura
+                                                por ponto</small>
+                                        </div>
+                                        <small class="helper-text" style="margin-top: 6px; display: block;">Desative
+                                            para medições mais rápidas (menos precisas)</small>
                                     </div>
 
                                     <div class="form-group">

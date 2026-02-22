@@ -54,11 +54,7 @@ namespace monitoring
             return serialConfigured && (hasRecentActivity || Serial.availableForWrite() > 0);
         }
         
-        // Call this from Serial logging to track activity
-        void notifySerialActivity() {
-            g_last_serial_activity = millis();
-            g_usb_activity_detected = true;
-        }
+
         
     } // namespace
 

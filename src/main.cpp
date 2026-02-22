@@ -19,6 +19,7 @@
 
 #include "file_manager.h"
 #include <FFat.h>
+#include "email_manager.h"
 
 // FreeRTOS headers
 extern "C"
@@ -217,6 +218,7 @@ void handleGetProgress(AsyncWebServerRequest *request)
   json += "}";
   
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   addCORSHeaders(response);
   request->send(response);
 }
@@ -264,6 +266,7 @@ void handleGetLogs(AsyncWebServerRequest *request)
 {
   String json = g_log_buffer.getLogsJSON();
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   addCORSHeaders(response);
   request->send(response);
 }
@@ -410,6 +413,108 @@ void handleStorageInfo(AsyncWebServerRequest *request)
   request->send(response);
 }
 
+void handleEmailSend(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+{
+  LOG_INFO("HTTP POST /api/email/send from %s", request->client()->remoteIP().toString().c_str());
+  
+  String body = String((char*)data).substring(0, len);
+  // Log body responsibly (truncate if huge)
+  if (body.length() > 200) LOG_DEBUG("Email req body: %s...", body.substring(0, 200).c_str());
+  else LOG_DEBUG("Email req body: %s", body.c_str());
+
+  StaticJsonDocument<1024> doc; 
+  DeserializationError error = deserializeJson(doc, body);
+
+  if (error) {
+    LOG_ERROR("JSON Error: %s", error.c_str());
+    AsyncWebServerResponse *response = request->beginResponse(400, "application/json", "{\"error\":\"invalid_json\"}");
+    addCORSHeaders(response);
+    request->send(response);
+    return;
+  }
+
+  String to = doc["to"] | "";
+  String cc = doc["cc"] | "";
+  String subjectInput = doc["subject"] | "No Subject";
+  String bodyText = doc["body"] | "";
+  
+  // Credentials
+  String senderEmail = doc["sender_email"] | "";
+  String senderPass = doc["sender_password"] | "";
+  String smtpHost = doc["smtp_host"] | "";
+  int smtpPort = doc["smtp_port"] | 465;
+
+  if (to.isEmpty() || senderEmail.isEmpty() || senderPass.isEmpty() || smtpHost.isEmpty()) {
+    String err = "{\"error\":\"missing_fields\", \"details\":\"to, sender_email, sender_password, smtp_host are required\"}";
+    request->send(400, "application/json", err);
+    return;
+  }
+
+  std::vector<String> files;
+  if (doc.containsKey("files")) {
+      JsonArray fileArray = doc["files"];
+      for(String f : fileArray) {
+          if (FileManager::isValidFilename(f)) {
+              files.push_back(String(FileManager::MEASUREMENTS_DIR) + "/" + f);
+          }
+      }
+  }
+
+  // Prefix
+  String fullSubject = "[ESP32 PARAMETER ANALYSER FOR MOSFETs] " + subjectInput;
+  
+  // Build Request
+  EmailRequest req;
+  req.smtpHost = smtpHost;
+  req.smtpPort = smtpPort;
+  req.senderEmail = senderEmail;
+  req.senderPassword = senderPass;
+  req.to = to;
+  req.cc = cc;
+  req.subject = fullSubject;
+  req.body = bodyText;
+  req.files = files;
+
+  if (EmailManager::getInstance().sendEmailAsync(req)) {
+      AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"status\":\"queued\"}");
+      addCORSHeaders(response);
+      request->send(response);
+  } else {
+      AsyncWebServerResponse *response = request->beginResponse(429, "application/json", "{\"error\":\"busy\"}");
+      addCORSHeaders(response);
+      request->send(response);
+  }
+}
+
+void handleEmailStatus(AsyncWebServerRequest *request)
+{
+  EmailStatus status = EmailManager::getInstance().getStatus();
+  
+  String stateStr = "IDLE";
+  switch(status.state) {
+      case EmailStatus::IDLE: stateStr = "IDLE"; break;
+      case EmailStatus::CONNECTING: stateStr = "CONNECTING"; break;
+      case EmailStatus::SENDING_BODY: stateStr = "SENDING_BODY"; break;
+      case EmailStatus::SENDING_ATTACHMENT: stateStr = "SENDING_ATTACHMENT"; break;
+      case EmailStatus::SUCCESS: stateStr = "SUCCESS"; break;
+      case EmailStatus::FAILED: stateStr = "FAILED"; break;
+  }
+
+  // Create JSON response
+  String json = "{";
+  json += "\"status\":\"" + stateStr + "\",";
+  json += "\"progress\":" + String(status.progress) + ",";
+  json += "\"message\":\"" + status.message + "\",";
+  json += "\"file\":\"" + status.currentFile + "\",";
+  json += "\"timestamp\":" + String(status.timestamp);
+  json += "}";
+
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  addCORSHeaders(response);
+  request->send(response);
+}
+
 void handleNotFound(AsyncWebServerRequest *request)
 {
   LOG_WARN("HTTP 404: %s %s", 
@@ -482,6 +587,9 @@ void setup()
   LOG_INFO("Monitoring system started");
   
   led_status::init();
+  
+  // Initialize Email Manager
+  EmailManager::getInstance().begin();
 
   // Configure AsyncWebServer routes
   LOG_INFO("Configuring AsyncWebServer routes");
@@ -494,6 +602,7 @@ void setup()
   server.on("/core.js", HTTP_GET, webui::sendCoreJs);
   server.on("/collection.js", HTTP_GET, webui::sendCollectionJs);
   server.on("/visualization.js", HTTP_GET, webui::sendVisualizationJs);
+  server.on("/email.js", HTTP_GET, webui::sendEmailJs);
   
   // API endpoints
   server.on("/api/status", HTTP_GET, handleStatus);
@@ -507,6 +616,16 @@ void setup()
   server.on("/api/files", HTTP_GET, handleListFiles);
   server.on("/api/storage", HTTP_GET, handleStorageInfo);
   
+  // Email endpoints
+  server.on("/api/email/status", HTTP_GET, handleEmailStatus);
+  server.on("/api/email/send", HTTP_POST, 
+    [](AsyncWebServerRequest *request){},
+    NULL,
+    handleEmailSend);
+
+  server.on("/api/email/send", HTTP_OPTIONS, handleCORS);
+  server.on("/api/email/status", HTTP_OPTIONS, handleCORS);
+
   // POST endpoints with body handling
   server.on("/api/start", HTTP_POST, 
     [](AsyncWebServerRequest *request){},

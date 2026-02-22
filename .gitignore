@@ -5,8 +5,6 @@
 .vscode/ipch
 KNOWN_ISSUES.md
 desejos futuros.txt
-
-# Security: Never commit credentials
 platformio_override.ini
 wifi_credentials_local.h
 include/secrets.h
@@ -14,3 +12,5 @@ ref/
 .agent/
 funcionalidades.txt
 test_data/
+include/email_credentials.h
+content_data/

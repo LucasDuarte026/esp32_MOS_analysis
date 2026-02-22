@@ -88,16 +88,23 @@ private:
 
 /**
  * @brief ESP32 internal ADC with oversampling for noise reduction
- * 
- * Uses multiple samples averaged together to increase effective resolution.
- * With 64 samples, effective resolution increases by ~3 bits (12→15 ENOB).
+ *
+ * Sampling strategy: Insertion Sort + Trimmed Mean (10 % / 10 %).
+ *   1. Collect N raw ADC readings.
+ *   2. Sort with Insertion Sort (stack-only, ideal for small arrays on MCU).
+ *   3. Discard the bottom 10 % and top 10 % (eliminates ADC spikes / outliers).
+ *   4. Average the central 80 % of samples.
+ *
+ * With N=64: discards 6 samples on each side, averages 52 central samples.
+ * With N=1 : trim=0, falls back to a plain single reading.
+ * Effective resolution gain: ~log2(N)/2 ENOB (e.g., 64x → 12→15 ENOB).
  */
 class InternalADC : public ICurrentSensor {
 public:
     /**
      * @brief Construct ADC controller
-     * @param pin GPIO pin for ADC (must be ADC1: GPIO32-39)
-     * @param oversamplingCount Number of samples to average (default 64)
+     * @param pin             GPIO pin for ADC (must be ADC1: GPIO32-39)
+     * @param oversamplingCount Number of samples per reading (1–256, default 64)
      */
     explicit InternalADC(uint8_t pin, uint16_t oversamplingCount = ADC_DEFAULT_SAMPLES);
     

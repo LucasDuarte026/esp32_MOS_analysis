@@ -23,6 +23,7 @@ files_to_embed = {
     "core_js": WEB_DIR / "core.js",
     "collection_js": WEB_DIR / "collection.js",
     "viz_js": WEB_DIR / "visualization.js",
+    "email_js": WEB_DIR / "email.js",
 }
 
 # Check all files exist
@@ -40,6 +41,7 @@ css_content = files_to_embed["css"].read_text(encoding="utf-8")
 core_js_content = files_to_embed["core_js"].read_text(encoding="utf-8")
 collection_js_content = files_to_embed["collection_js"].read_text(encoding="utf-8")
 viz_js_content = files_to_embed["viz_js"].read_text(encoding="utf-8")
+email_js_content = files_to_embed["email_js"].read_text(encoding="utf-8")
 
 index_literal = json.dumps(index_content)
 viz_literal = json.dumps(viz_content)
@@ -48,6 +50,7 @@ css_literal = json.dumps(css_content)
 core_js_literal = json.dumps(core_js_content)
 collection_js_literal = json.dumps(collection_js_content)
 viz_js_literal = json.dumps(viz_js_content)
+email_js_literal = json.dumps(email_js_content)
 
 header = f"""#pragma once
 #include <pgmspace.h>
@@ -60,6 +63,7 @@ static const char kDashboardCss[] PROGMEM = {css_literal};
 static const char kCoreJs[] PROGMEM = {core_js_literal};
 static const char kCollectionJs[] PROGMEM = {collection_js_literal};
 static const char kVisualizationJs[] PROGMEM = {viz_js_literal};
+static const char kEmailJs[] PROGMEM = {email_js_literal};
 }}
 """
 

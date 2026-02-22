@@ -99,17 +99,49 @@ float InternalADC::readVoltage() {
         LOG_ERROR("ADC on GPIO%d not initialized!", pin_);
         return 0.0f;
     }
-    
-    // Oversampling - sum multiple readings
-    uint32_t sum = 0;
-    for (uint16_t i = 0; i < oversamplingCount_; i++) {
-        sum += analogRead(pin_);
+
+    // ── Coleta de amostras ────────────────────────────────────────────────
+    // Buffer estático na stack (oversamplingCount_ ≤ 256, clampado no ctor).
+    uint16_t samples[256];
+    const uint16_t n = oversamplingCount_;
+    for (uint16_t i = 0; i < n; i++) {
+        samples[i] = static_cast<uint16_t>(analogRead(pin_));
     }
-    
-    // Calculate average
-    float avgRaw = static_cast<float>(sum) / oversamplingCount_;
-    
-    // Convert to voltage
+
+    // ── Insertion Sort ────────────────────────────────────────────────────
+    // Ideal para arrays pequenos (≤ 256): sem heap, sem recursão, eficiente
+    // em dados quase-ordenados (ruído do ADC costuma ser próximo do valor real).
+    for (uint16_t i = 1; i < n; i++) {
+        uint16_t key = samples[i];
+        int16_t  j   = static_cast<int16_t>(i) - 1;
+        while (j >= 0 && samples[j] > key) {
+            samples[j + 1] = samples[j];
+            j--;
+        }
+        samples[j + 1] = key;
+    }
+
+    // ── Trimmed Mean (aparado 10% / 10%) ─────────────────────────────────
+    // Descarta os 10% menores e os 10% maiores; faz média no núcleo central.
+    // Com n=64: descarta 6 de cada lado → média sobre 52 amostras.
+    // Com n=1 : trim=0 → comportamento idêntico à média simples.
+    const uint16_t trim  = n / 10;          // amostras descartadas de cada ponta
+    const uint16_t start = trim;
+    const uint16_t end   = n - trim;        // índice exclusivo
+
+    uint32_t sum   = 0;
+    uint16_t count = 0;
+    for (uint16_t i = start; i < end; i++) {
+        sum += samples[i];
+        count++;
+    }
+
+    // Proteção contra divisão por zero (só ocorre se n=0, bloqueado no ctor)
+    if (count == 0) count = 1;
+
+    const float avgRaw = static_cast<float>(sum) / count;
+
+    // ── Conversão para tensão ─────────────────────────────────────────────
     return (avgRaw / ADC_MAX_VALUE) * ADC_VREF;
 }
 
@@ -117,7 +149,7 @@ void InternalADC::setOversamplingCount(uint16_t count) {
     if (count < 1) count = 1;
     if (count > 256) count = 256;
     oversamplingCount_ = count;
-    LOG_DEBUG("ADC oversampling set to %d samples (~%.1f ENOB)", 
+    LOG_DEBUG("ADC oversampling set to %d samples (~%.1f ENOB)",
               count, getEffectiveBits());
 }
 

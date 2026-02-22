@@ -12,6 +12,7 @@ void sendCSS(AsyncWebServerRequest *request);
 void sendCoreJs(AsyncWebServerRequest *request);
 void sendCollectionJs(AsyncWebServerRequest *request);
 void sendVisualizationJs(AsyncWebServerRequest *request);
+void sendEmailJs(AsyncWebServerRequest *request);
 } // namespace webui
 #else
 #include <WebServer.h>
@@ -24,5 +25,6 @@ void sendCSS(WebServer &server);
 void sendCoreJs(WebServer &server);
 void sendCollectionJs(WebServer &server);
 void sendVisualizationJs(WebServer &server);
+void sendEmailJs(WebServer &server);
 } // namespace webui
 #endif

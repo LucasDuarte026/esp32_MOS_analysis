@@ -66,6 +66,11 @@ void sendVisualizationJs(AsyncWebServerRequest *request)
   sendProgmemChunked(request, "application/javascript", kVisualizationJs);
 }
 
+void sendEmailJs(AsyncWebServerRequest *request)
+{
+  sendProgmemChunked(request, "application/javascript", kEmailJs);
+}
+
 #else
 // Sync WebServer version (legacy)
 void sendIndex(WebServer &server)
@@ -101,6 +106,11 @@ void sendCollectionJs(WebServer &server)
 void sendVisualizationJs(WebServer &server)
 {
   server.send_P(200, "application/javascript", kVisualizationJs);
+}
+
+void sendEmailJs(WebServer &server)
+{
+  server.send_P(200, "application/javascript", kEmailJs);
 }
 #endif
 
