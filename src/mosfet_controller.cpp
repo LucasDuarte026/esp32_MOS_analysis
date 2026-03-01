@@ -332,7 +332,17 @@ void MOSFETController::performSweep()
     len = snprintf(lineBuf, sizeof(lineBuf), "# Oversampling: %s (%dx)\n", 
         config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
     currentFile_.write((uint8_t*)lineBuf, len);
-    
+
+    // Hardware mode metadata — records which peripherals collected the data
+    if (config_.use_external_hw) {
+        len = snprintf(lineBuf, sizeof(lineBuf),
+            "# Hardware: Misto/Externo (VDS: DAC Interno ESP32 8-bit, VGS: MCP4725 12-bit, ADC: ADS1115 16-bit)\n");
+    } else {
+        len = snprintf(lineBuf, sizeof(lineBuf),
+            "# Hardware: ESP32 Interno (VDS: DAC 8-bit, VGS: DAC 8-bit, ADC: 12-bit)\n");
+    }
+    currentFile_.write((uint8_t*)lineBuf, len);
+
     len = snprintf(lineBuf, sizeof(lineBuf), "# Firmware: %s\n", SOFTWARE_VERSION);
     currentFile_.write((uint8_t*)lineBuf, len);
     
@@ -402,10 +412,13 @@ void MOSFETController::performSweep()
             vTaskDelay(pdMS_TO_TICKS(settling * 3)); // longer settling on VDS transition
             
             for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
+                uint32_t t_dac  = millis();
                 hal::setVGS(vgs);
-                vTaskDelay(pdMS_TO_TICKS(settling));
-                
+                uint32_t t_set  = millis();
+                if (settling > 0) vTaskDelay(pdMS_TO_TICKS(settling));
+                uint32_t t_adc  = millis();
                 float vsh = readAnalogVoltage();
+                uint32_t t_done = millis();
                 float ids = vsh / rshunt;
                 
                 // Buffer data for parameter calculation
@@ -422,6 +435,16 @@ void MOSFETController::performSweep()
                 current_point++;
                 progressPercent_ = (current_point * 100) / total_points;
                 
+                // Timing debug: log every 50 points
+                if (rowCount % 50 == 1) {
+                    LOG_DEBUG("[TIMING] VGS=%.3fV | DAC write=%lums | Settle=%lums | ADC read=%lums | Total=%lums",
+                              vgs,
+                              (unsigned long)(t_set  - t_dac),
+                              (unsigned long)(t_adc  - t_set),
+                              (unsigned long)(t_done - t_adc),
+                              (unsigned long)(t_done - t_dac));
+                }
+
                 if (rowCount % 50 == 0) {
                     currentFile_.flush();
                     vTaskDelay(1);

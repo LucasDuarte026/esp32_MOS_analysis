@@ -483,7 +483,7 @@ function updatePlotsMultiCurve() {
                 y: [Math.pow(10, meta.ssTangent.y1), Math.pow(10, meta.ssTangent.y2)],
                 mode: 'lines',
                 name: `SS Slope (${meta.ss.toFixed(0)}mV/dec)`,
-                line: { color: colors.tangent, width: 2, dash: 'dash' }
+                line: { color: colors.ss, width: 2 }
             });
         }
     }

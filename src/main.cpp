@@ -8,6 +8,7 @@
 #include "version.h"
 
 #include "wifi_credentials.h"
+#include "wifi_manager.h"
 #define USE_ASYNC_WEBSERVER
 #include "web_ui.h"
 #include "mosfet_controller.h"
@@ -31,7 +32,7 @@ extern "C"
 namespace
 {
 constexpr uint8_t LED_PIN = 2;
-constexpr uint32_t WIFI_TIMEOUT_MS = 20000;
+
 
 // ESPAsyncWebServer - Non-blocking!
 AsyncWebServer server(80);
@@ -128,7 +129,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   config.vgs_end = doc["vgs_end"] | 3.5f;
   config.vgs_step = doc["vgs_step"] | 0.05f;
   config.rshunt = doc["rshunt"] | 100.0f;
-  config.settling_ms = doc["settling_ms"] | 5;
+  config.settling_ms = doc["settling_ms"] | 0;
   
   const char* fname = doc["filename"] | "mosfet_data";
   config.filename = String(fname);
@@ -140,11 +141,22 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   const char* sweepModeStr = doc["sweep_mode"] | "VGS";
   config.sweep_mode = (strcmp(sweepModeStr, "VDS") == 0) ? SWEEP_VDS : SWEEP_VGS;
   
-  // Oversampling configuration (1 = disabled, 64 = default)
-  uint16_t oversampling = doc["oversampling"] | 64;
+  // Oversampling configuration (1 = disabled, 16 = default)
+  uint16_t oversampling = doc["oversampling"] | 16;
   config.oversampling = oversampling;
-  hal::HardwareHAL::instance().getShuntADC().setOversamplingCount(oversampling);
+  // NOTE: setOversamplingCount removed here — switchMode() below recreates the
+  // ADC instance with halCfg.adc_oversampling, making a prior call redundant.
   LOG_INFO("ADC oversampling set to %d (%s)", oversampling, oversampling > 1 ? "enabled" : "disabled");
+
+  // Hardware mode: true = external I2C (MCP4725 VGS + ADS1115), false = internal ESP32
+  bool useExternal = doc["use_external_hw"] | true;  // default: external
+  config.use_external_hw = useExternal;
+  hal::HardwareMode targetMode = useExternal ? hal::HardwareMode::HW_EXTERNAL : hal::HardwareMode::HW_INTERNAL;
+  hal::HalConfig halCfg;
+  halCfg.hardware_mode   = targetMode;
+  halCfg.adc_oversampling = oversampling;
+  hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
+  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VGS + ADS1115)" : "HW_INTERNAL (ESP32)");
   
   // Validate
   if (config.vgs_start < 0 || config.vgs_end > 5.0) {
@@ -237,6 +249,36 @@ void handleUSBStatus(AsyncWebServerRequest *request)
   monitoring::SystemStatus status = monitoring::getStatus();
   String json = "{\"usb_connected\":" + String(status.usb_connected ? "true" : "false") + "}";
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  addCORSHeaders(response);
+  request->send(response);
+}
+
+void handleHwCheck(AsyncWebServerRequest *request)
+{
+  // Only meaningful in EXTERNAL mode; in INTERNAL mode all devices are "not needed"
+  bool isExternal = (hal::HardwareHAL::instance().getMode() == hal::HardwareMode::HW_EXTERNAL);
+
+  String json = "{";
+  if (!isExternal) {
+    // Internal mode — no external devices required
+    json += "\"mode\":\"internal\",";
+    json += "\"mcp4725_vgs\":null,";
+    json += "\"ads1115\":null,";
+    json += "\"all_ok\":true";
+  } else {
+    auto s = hal::HardwareHAL::checkExternalDevices();
+    json += "\"mode\":\"external\",";
+    json += "\"mcp4725_vgs\":" + String(s.mcp4725_vgs ? "true" : "false") + ",";
+    json += "\"ads1115\":" + String(s.ads1115 ? "true" : "false") + ",";
+    json += "\"all_ok\":" + String(s.all_ok() ? "true" : "false");
+    LOG_INFO("HW check: MCP4725_VGS=%s ADS1115=%s",
+             s.mcp4725_vgs ? "OK" : "MISSING",
+             s.ads1115     ? "OK" : "MISSING");
+  }
+  json += "}";
+
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   addCORSHeaders(response);
   request->send(response);
 }
@@ -526,37 +568,6 @@ void handleNotFound(AsyncWebServerRequest *request)
   request->send(response);
 }
 
-void connectToWifi()
-{
-  LOG_INFO("Connecting to WiFi: %s", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.setHostname(WIFI_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  led_status::setState(led_status::State::WIFI_DISCONNECTED);
-
-  const uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    vTaskDelay(pdMS_TO_TICKS(250));
-
-    if (millis() - start > WIFI_TIMEOUT_MS)
-    {
-      LOG_ERROR("WiFi connection timeout after %d ms", WIFI_TIMEOUT_MS);
-      LOG_ERROR("Restarting ESP32 in 5 seconds...");
-      vTaskDelay(pdMS_TO_TICKS(5000));
-      ESP.restart();
-    }
-  }
-
-  digitalWrite(LED_PIN, HIGH);
-  led_status::setState(led_status::State::STANDBY);
-  
-  LOG_INFO("WiFi connected!");
-  LOG_INFO("IP Address: %s", WiFi.localIP().toString().c_str());
-  LOG_INFO("Hostname: %s.local", WIFI_HOSTNAME);
-}
 
 } // namespace
 
@@ -574,7 +585,7 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
 
   mosfet_controller.begin();
-  connectToWifi();
+  wifi_manager::connectWithFallback();
 
   if (MDNS.begin(WIFI_HOSTNAME))
   {
@@ -608,6 +619,7 @@ void setup()
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/temperature", HTTP_GET, handleTemperature);
   server.on("/api/usb_status", HTTP_GET, handleUSBStatus);
+  server.on("/api/hw/check", HTTP_GET, handleHwCheck);  // External peripheral probe
   server.on("/api/system_info", HTTP_GET, handleSystemInfo);
   server.on("/api/progress", HTTP_GET, handleGetProgress);
   server.on("/api/logs", HTTP_GET, handleGetLogs);

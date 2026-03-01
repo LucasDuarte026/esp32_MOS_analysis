@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Coleta - MOSFET Analysis</title>
+    <title>MOSFET Analysis</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <link rel="stylesheet" href="dashboard.css">
 </head>
@@ -86,22 +86,48 @@
                             <h2>Configurações de Medida</h2>
                         </div>
                         <div class="card-body">
-                            <!-- Sweep Mode Toggle -->
-                            <div class="sweep-mode-section"
+                            <!-- Sweep Mode + Hardware Mode (two columns) -->
+                            <div class="dual-toggle-row"
                                 style="margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 2px solid var(--border-color);">
-                                <h3 style="margin-bottom: var(--spacing-md);">Modo de Varredura</h3>
-                                <div class="sweep-mode-toggle">
-                                    <span class="mode-label mode-active" id="mode-vgs-label">Curva Id × Vgs</span>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="sweep-mode-toggle">
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                    <span class="mode-label mode-dimmed" id="mode-vds-label">Curva Id × Vds</span>
+
+                                <!-- Sweep Mode Toggle -->
+                                <div class="dual-toggle-col">
+                                    <h3 style="margin-bottom: var(--spacing-md);">Modo de Varredura</h3>
+                                    <div class="sweep-mode-toggle">
+                                        <span class="mode-label mode-active" id="mode-vgs-label">Curva Id × Vgs</span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="sweep-mode-toggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <span class="mode-label mode-dimmed" id="mode-vds-label">Curva Id × Vds</span>
+                                    </div>
+                                    <small class="helper-text"
+                                        style="display: block; margin-top: var(--spacing-sm); text-align: center;">
+                                        <span id="sweep-mode-desc">Varia VGS para cada VDS fixo (padrão)</span>
+                                    </small>
                                 </div>
-                                <small class="helper-text"
-                                    style="display: block; margin-top: var(--spacing-sm); text-align: center;">
-                                    <span id="sweep-mode-desc">Varia VGS para cada VDS fixo (padrão)</span>
-                                </small>
+
+                                <!-- Hardware Mode Toggle (red) -->
+                                <div class="dual-toggle-col dual-toggle-divider">
+                                    <h3 style="margin-bottom: var(--spacing-md);">Periféricos</h3>
+                                    <div class="sweep-mode-toggle">
+                                        <span class="mode-label mode-red mode-active" id="hw-ext-label">DAC e
+                                            ADC<br><small style="font-size:11px;font-weight:400;">Externos (MCP4725 +
+                                                ADS1115)</small></span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="hw-mode-toggle">
+                                            <span class="toggle-slider toggle-slider-red"></span>
+                                        </label>
+                                        <span class="mode-label mode-red mode-dimmed" id="hw-int-label">DAC e
+                                            ADC<br><small style="font-size:11px;font-weight:400;">Internos
+                                                (ESP32)</small></span>
+                                    </div>
+                                    <small class="helper-text"
+                                        style="display: block; margin-top: var(--spacing-sm); text-align: center;">
+                                        <span id="hw-mode-desc">Externos por padrão — mais precisos</span>
+                                    </small>
+                                </div>
+
                             </div>
 
                             <!-- VDS Configuration Section -->
@@ -192,10 +218,10 @@
 
                                     <div class="form-group">
                                         <label for="settling-time">Tempo de Estabilização (ms)</label>
-                                        <input type="number" id="settling-time" class="input-field" min="1" max="1000"
-                                            step="1" value="1">
+                                        <input type="number" id="settling-time" class="input-field" min="0" max="1000"
+                                            step="1" value="0">
                                         <small class="helper-text">Tempo entre escrita DAC e leitura ADC (recomendado:
-                                            1ms)</small>
+                                            0ms)</small>
                                     </div>
 
                                     <!-- Oversampling Toggle -->
@@ -240,12 +266,13 @@
                                                 style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Fator
                                                 de Oversampling</label>
                                             <select id="oversampling-factor" class="select-field">
+                                                <option value="1">× 1 &nbsp;(sem oversampling)</option>
                                                 <option value="2">× 2 &nbsp;(mais rápido)</option>
                                                 <option value="4">× 4</option>
                                                 <option value="8">× 8</option>
-                                                <option value="16">× 16</option>
+                                                <option value="16" selected>× 16 &nbsp;(padrão)</option>
                                                 <option value="32">× 32</option>
-                                                <option value="64" selected>× 64 &nbsp;(padrão — mais preciso)</option>
+                                                <option value="64">× 64 &nbsp;(mais preciso)</option>
                                             </select>
                                             <small class="helper-text" id="oversampling-time-hint">~1.0 ms de leitura
                                                 por ponto</small>
@@ -417,6 +444,45 @@
                 <button class="btn btn-secondary" id="btn-close-storage-modal" style="min-width: 120px;">
                     Fechar
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hardware Not Found Modal -->
+    <div id="hw-error-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content"
+            style="max-width: 500px; background: var(--bg-card); border-radius: 16px; padding: 0; overflow: hidden;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #c62828, #b71c1c); padding: 24px; text-align: center;">
+                <svg width="56" height="56" viewBox="0 0 24 24" fill="white" style="margin-bottom: 10px;">
+                    <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+                </svg>
+                <h2 style="color: white; margin: 0; font-size: 22px;">Periférico não detectado</h2>
+            </div>
+
+            <!-- Body -->
+            <div style="padding: 24px;">
+                <p style="color: var(--text-primary); font-size: 15px; margin-bottom: 14px; line-height: 1.6;">
+                    Os seguintes dispositivos <strong>não responderam</strong> no barramento I²C:
+                </p>
+                <div id="hw-missing-list"
+                    style="background: rgba(198,40,40,0.08); border-left: 4px solid #c62828; padding: 14px 18px; border-radius: 8px; margin-bottom: 18px; font-family: monospace; font-size: 14px; line-height: 1.8; color: var(--text-primary);">
+                </div>
+                <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin-bottom: 20px;">
+                    Verifique a fiação e a alimentação dos módulos, depois tente novamente.<br>
+                    Você também pode continuar a medição usando apenas os periféricos <strong>internos do
+                        ESP32</strong>.
+                </p>
+                <!-- Actions -->
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button id="btn-hw-modal-use-internal" class="btn"
+                        style="flex: 1; min-width: 160px; background: linear-gradient(135deg, #c62828, #b71c1c); color: white; border: none;">
+                        ⚡ Usar Internos (ESP32)
+                    </button>
+                    <button id="btn-hw-modal-close" class="btn btn-secondary" style="flex: 1; min-width: 120px;">
+                        Fechar e Verificar
+                    </button>
+                </div>
             </div>
         </div>
     </div>

@@ -22,9 +22,11 @@
   #include "secrets.h"
 #endif
 
-// Validate that WIFI_SSID is defined
+// If WIFI_SSID is not provided, default to empty string.
+// The wifi_manager state machine will detect this and immediately
+// prompt for credentials via Serial at boot.
 #ifndef WIFI_SSID
-#error "WIFI_SSID must be defined either in include/secrets.h or via build flags in platformio.ini"
+#define WIFI_SSID ""
 #endif
 
 #ifndef WIFI_PASSWORD

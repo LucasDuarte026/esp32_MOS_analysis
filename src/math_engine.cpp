@@ -211,125 +211,134 @@ float calculateVt(
     if (d2Idx > 0 && d2Idx < vgs.size()) {
         return vgs[d2Idx];
     }
-    
     return 0.0f;
 }
 
 // ============================================================================
-// SS Calculation with Tangent Line
+// SS Calculation — Sliding-Window Linear Regression
 // ============================================================================
+//
+// Strategy: for every candidate window [i, i+win) in the region where
+// log10(Ids) is strictly increasing, perform a linear regression of
+// log10(Ids) vs VGS. Keep the window that yields the highest R².
+// SS = (1 / slope_best) × 1000 mV/dec.
+//
+// This replaces the brittle "longest run of consistent slopes" heuristic,
+// which failed on saturated curves where the subthreshold region is short.
 
 SSResult calculateSS(
-    const std::vector<float>& ids, 
+    const std::vector<float>& ids,
     const std::vector<float>& vgs
 ) {
     SSResult result;
-    
+
     if (ids.size() != vgs.size() || ids.size() < 10) {
         return result;
     }
-    
-    size_t n = ids.size();
-    
-    // Step 0: Smooth IDs to reduce noise
-    std::vector<float> idsSmooth = movingAverageSmooth(ids, 5);
-    
-    // Step 1: Calculate local slopes (d(log10(Ids))/dVgs)
-    std::vector<float> slopes(n, 0.0f);
-    std::vector<bool> valid(n, false);
-    
-    for (size_t i = 1; i < n - 1; i++) {
-        float idsPrev = fabs(idsSmooth[i - 1]);
-        float idsNext = fabs(idsSmooth[i + 1]);
-        
-        // Skip near-zero currents (noise floor)
-        if (idsPrev < 1e-12f || idsNext < 1e-12f) continue;
-        
-        float dVgs = vgs[i + 1] - vgs[i - 1];
-        float dLogIds = log10f(idsNext) - log10f(idsPrev);
-        
-        // Positive slope = current increasing (subthreshold region)
-        if (fabs(dVgs) > 1e-9f && dLogIds > 0.01f) {
-            slopes[i] = dLogIds / dVgs;  // decades/V
-            valid[i] = (slopes[i] > 0.5f);  // At least 0.5 dec/V
+
+    const size_t n = ids.size();
+
+    // ── Step 1: build log10(Ids) array; mark invalid points ────────────────
+    const float IDS_FLOOR = 1e-13f;   // below this = noise, skip
+
+    std::vector<float> logIds(n, 0.0f);
+    std::vector<bool>  usable(n, false);
+
+    // Light smoothing to reduce ADC spikes before taking log
+    std::vector<float> idsSmooth = movingAverageSmooth(ids, 3);
+
+    for (size_t i = 0; i < n; i++) {
+        float val = fabsf(idsSmooth[i]);
+        if (val > IDS_FLOOR) {
+            logIds[i] = log10f(val);
+            usable[i] = true;
         }
     }
-    
-    // Step 2: Find longest run of consistent slopes
-    size_t bestStart = 0, bestLen = 0;
-    size_t currStart = 0, currLen = 0;
-    
-    for (size_t i = 1; i < n; i++) {
-        if (!valid[i]) {
-            if (currLen > bestLen) {
-                bestStart = currStart;
-                bestLen = currLen;
-            }
-            currLen = 0;
-            currStart = i + 1;
-            continue;
-        }
-        
-        if (currLen == 0 || !valid[i - 1]) {
-            currStart = i;
-            currLen = 1;
-        } else {
-            float ratio = slopes[i] / slopes[i - 1];
-            // Check consistency (within 2x)
-            if (ratio > 0.5f && ratio < 2.0f) {
-                currLen++;
-            } else {
-                if (currLen > bestLen) {
-                    bestStart = currStart;
-                    bestLen = currLen;
+
+    // ── Step 2: sliding-window regression ──────────────────────────────────
+    // Window sizes to try (in number of points)
+    const size_t MIN_WIN = 5;
+    const size_t MAX_WIN = 20;
+
+    float bestR2     = -1.0f;
+    float bestSlope  =  0.0f;
+    float bestIntercept = 0.0f;
+    size_t bestWinStart = 0;
+    size_t bestWinEnd   = 0;
+
+    // Pre-allocate reusable buffers OUTSIDE the loop to avoid ~100K heap
+    // alloc/free cycles per measurement curve (which caused heap fragmentation
+    // and a crash in the file download handler after measurement).
+    std::vector<float> wx, wy;
+    wx.reserve(MAX_WIN);
+    wy.reserve(MAX_WIN);
+
+    for (size_t win = MIN_WIN; win <= MAX_WIN && win <= n; win++) {
+        for (size_t start = 0; start + win <= n; start++) {
+            size_t end = start + win;  // exclusive
+
+            // Reuse buffers — no heap allocation inside the hot loop
+            wx.clear();
+            wy.clear();
+
+            for (size_t i = start; i < end; i++) {
+                if (usable[i]) {
+                    wx.push_back(vgs[i]);
+                    wy.push_back(logIds[i]);
                 }
-                currStart = i;
-                currLen = 1;
             }
-        }
-    }
-    if (currLen > bestLen) {
-        bestStart = currStart;
-        bestLen = currLen;
-    }
-    
-    // Step 3: Perform linear regression on best region
-    if (bestLen >= 3) {
-        std::vector<float> x, y;
-        for (size_t i = bestStart; i < bestStart + bestLen && i < n; i++) {
-            float val = fabs(ids[i]);
-            if (val > 1e-15f) {
-                x.push_back(vgs[i]);
-                y.push_back(log10f(val));
-            }
-        }
-        
-        if (x.size() >= 3) {
+
+            if (wx.size() < MIN_WIN) continue;
+
+            // Filter 1: log(Ids) must be net-increasing (subthreshold region)
+            if (wy.back() <= wy.front()) continue;
+
+            // Filter 2: require at least 0.5 decades of variation across the window.
+            // Windows with ΔlogIds < 0.5 dec are flat → ADC noise, not subthreshold.
+            const float MIN_DELTA_DECADES = 0.5f;
+            if ((wy.back() - wy.front()) < MIN_DELTA_DECADES) continue;
+
             float slope, intercept;
-            float r2 = linearRegression(x, y, slope, intercept);
-            
-            if (fabs(slope) > 1e-9f && r2 > 0.9f) {
-                // SS = (1/slope) * 1000 mV/dec
-                float ss_val = (1.0f / fabs(slope)) * 1000.0f;
-                
-                // Sanity check (60-1000 mV/dec is reasonable)
-                if (ss_val >= 60.0f && ss_val <= 2000.0f) {
-                    result.ss_mVdec = ss_val;
-                    result.valid = true;
-                    result.regionStart = bestStart;
-                    result.regionEnd = bestStart + bestLen - 1;
-                    
-                    // Calculate tangent line coordinates
-                    // Use first and last points of the regression region
-                    result.x1 = x.front();
-                    result.y1 = slope * result.x1 + intercept;
-                    result.x2 = x.back();
-                    result.y2 = slope * result.x2 + intercept;
-                }
+            float r2 = linearRegression(wx, wy, slope, intercept);
+
+            // Filter 3: slope must be ≥ 1 dec/V → SS ≤ 1000 mV/dec.
+            // Shallower slopes are fitting thermal noise in saturation, not subthreshold.
+            const float MIN_SLOPE_DEC_PER_V = 1.0f;
+            if (slope < MIN_SLOPE_DEC_PER_V) continue;
+
+            if (r2 > bestR2) {
+                bestR2        = r2;
+                bestSlope     = slope;
+                bestIntercept = intercept;
+                bestWinStart  = start;
+                bestWinEnd    = end - 1;  // inclusive
             }
         }
     }
-    
+
+    // ── Step 3: validate and produce result ────────────────────────────────
+    // Accept R² ≥ 0.85 (relaxed from 0.9 to handle noisy/short regions)
+    const float MIN_R2 = 0.85f;
+
+    if (bestR2 >= MIN_R2 && bestSlope > 1e-9f) {
+        float ss_val = (1.0f / bestSlope) * 1000.0f;  // mV/dec
+
+        // Physically plausible range: 60 mV/dec (ideal) … 1000 mV/dec
+        // (values above 1000 indicate noise fitting, not real subthreshold)
+        if (ss_val >= 60.0f && ss_val <= 1000.0f) {
+            result.ss_mVdec   = ss_val;
+            result.valid      = true;
+            result.regionStart = bestWinStart;
+            result.regionEnd   = bestWinEnd;
+
+            // Tangent line endpoints in log10(Ids) space
+            result.x1 = vgs[bestWinStart];
+            result.y1 = bestSlope * result.x1 + bestIntercept;
+            result.x2 = vgs[bestWinEnd];
+            result.y2 = bestSlope * result.x2 + bestIntercept;
+        }
+    }
+
     return result;
 }
 

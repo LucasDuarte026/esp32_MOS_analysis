@@ -24,9 +24,10 @@ struct SweepConfig
     float vds_step;
     float rshunt;
     int settling_ms;
-    uint16_t oversampling = 64;  // ADC oversampling count (1 = disabled, 64 = enabled)
+    uint16_t oversampling = 16;     // ADC oversampling count (1 = disabled, 16 = default)
+    bool use_external_hw  = true;   // true = MCP4725 VGS + ADS1115; false = internal ESP32
     String filename;
-    SweepMode sweep_mode = SWEEP_VGS;  // Default to VGS sweep
+    SweepMode sweep_mode = SWEEP_VGS;  // Default VGS sweep
 };
 
 struct DataPoint

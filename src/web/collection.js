@@ -121,6 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const sweepModeToggle = document.getElementById('sweep-mode-toggle');
         const sweepMode = sweepModeToggle && sweepModeToggle.checked ? 'VDS' : 'VGS';
 
+        // Get hardware mode from toggle (unchecked = external, checked = internal)
+        const hwModeToggle = document.getElementById('hw-mode-toggle');
+        const useExternalHW = hwModeToggle ? !hwModeToggle.checked : true; // default: external
+
         // Get oversampling setting
         const oversamplingToggle = document.getElementById('oversampling-toggle');
         const oversamplingEnabled = oversamplingToggle ? oversamplingToggle.checked : true;
@@ -137,8 +141,9 @@ document.addEventListener('DOMContentLoaded', () => {
             vds_end: vdsEnd,
             vds_step: vdsStep,
             rshunt: rshunt,
-            settling_ms: settlingTime || 5,
+            settling_ms: (settlingTime === 0 || settlingTime > 0) ? settlingTime : 0,
             oversampling: oversamplingFactor,
+            use_external_hw: useExternalHW,
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
             timestamp: Math.floor(Date.now() / 1000)
@@ -146,8 +151,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             console.log("Sending start request", config);
-            // Disable button
+            // Disable button while checking
             btn.disabled = true;
+            btn.innerHTML = '<span class="status-dot" style="background:white;width:8px;height:8px;"></span> Verificando hardware...';
+
+            // ── Pre-flight: probe external I2C devices if in external mode ──────
+            if (useExternalHW) {
+                let hwCheck;
+                try {
+                    const hwRes = await fetch(`/api/hw/check?t=${Date.now()}`);
+                    hwCheck = await hwRes.json();
+                } catch (e) {
+                    showToast("❌ Não foi possível verificar o hardware externo.", "error");
+                    resetCollectionButton();
+                    return;
+                }
+
+                if (!hwCheck.all_ok) {
+                    const missing = [];
+                    if (hwCheck.mcp4725_vgs === false) missing.push('MCP4725 (DAC VGS — I²C 0x60)');
+                    if (hwCheck.ads1115 === false) missing.push('ADS1115 (ADC — I²C 0x48)');
+
+                    console.error('HW check failed:', hwCheck);
+                    showToast(`❌ Hardware externo não encontrado: ${missing.join(', ')}`, "error");
+                    showHwErrorModal(missing);
+                    resetCollectionButton();
+                    return;
+                }
+                console.log('HW check passed:', hwCheck);
+            }
+            // ── End pre-flight ──────────────────────────────────────────────────
+
             btn.innerHTML = '<span class="status-dot" style="background:white;width:8px;height:8px;"></span> Inicializando...';
 
             const progressSection = document.getElementById('progress-section');
@@ -283,7 +317,7 @@ document.getElementById('btn-reset-fields')?.addEventListener('click', () => {
 
     // Hardware fields
     document.getElementById('rshunt').value = '';
-    document.getElementById('settling-time').value = '5';
+    document.getElementById('settling-time').value = '0';
     document.getElementById('filename').value = '';
 });
 
@@ -336,6 +370,29 @@ document.getElementById('sweep-mode-toggle')?.addEventListener('change', (e) => 
     }
 });
 
+// Hardware Mode Toggle - update visual state (red colors)
+document.getElementById('hw-mode-toggle')?.addEventListener('change', (e) => {
+    const extLabel = document.getElementById('hw-ext-label');
+    const intLabel = document.getElementById('hw-int-label');
+    const descEl = document.getElementById('hw-mode-desc');
+
+    if (e.target.checked) {
+        // INTERNAL mode (ESP32 native)
+        extLabel.classList.remove('mode-active');
+        extLabel.classList.add('mode-dimmed');
+        intLabel.classList.remove('mode-dimmed');
+        intLabel.classList.add('mode-active');
+        if (descEl) descEl.textContent = 'Internos — DAC 8-bit / ADC 12-bit (ESP32)';
+    } else {
+        // EXTERNAL mode (MCP4725 + ADS1115) — default
+        extLabel.classList.add('mode-active');
+        extLabel.classList.remove('mode-dimmed');
+        intLabel.classList.add('mode-dimmed');
+        intLabel.classList.remove('mode-active');
+        if (descEl) descEl.textContent = 'Externos por padrão — mais precisos';
+    }
+});
+
 // Oversampling Toggle - update visual state and show/hide factor dropdown
 document.getElementById('oversampling-toggle')?.addEventListener('change', (e) => {
     const offLabel = document.getElementById('oversampling-off-label');
@@ -361,17 +418,23 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
 
 // Oversampling Factor dropdown — update time hint
 (function () {
-    const ADC_US_PER_SAMPLE = 15; // ~15µs per analogRead on ESP32
+    // ADS1115 at 860 SPS ≈ 1.16 ms/sample; ESP32 internal ≈ 0.015 ms/sample
+    const ADS1115_MS_PER_SAMPLE = 1.16;
+    const INTERNAL_MS_PER_SAMPLE = 0.015;
     function updateOversamplingHint() {
         const sel = document.getElementById('oversampling-factor');
         const hint = document.getElementById('oversampling-time-hint');
         if (!sel || !hint) return;
         const n = parseInt(sel.value);
-        const ms = ((n * ADC_US_PER_SAMPLE) / 1000).toFixed(2);
-        hint.textContent = `~${ms} ms de leitura por ponto (${n} amostras)`;
+        const settlingEl = document.getElementById('settling-time');
+        const settling = settlingEl ? parseInt(settlingEl.value) || 0 : 5;
+        // Use ADS1115 timing (external mode is default)
+        const adcMs = (n * ADS1115_MS_PER_SAMPLE).toFixed(1);
+        const totalMs = (parseFloat(adcMs) + settling).toFixed(1);
+        hint.textContent = `ADC: ~${adcMs}ms + settling ${settling}ms = ~${totalMs}ms/ponto (${n} amostras)`;
     }
     document.getElementById('oversampling-factor')?.addEventListener('change', updateOversamplingHint);
-    // Run once on load to set initial hint
+    document.getElementById('settling-time')?.addEventListener('input', updateOversamplingHint);
     document.addEventListener('DOMContentLoaded', updateOversamplingHint);
 })();
 
@@ -431,5 +494,41 @@ document.getElementById('btn-modal-delete-all')?.addEventListener('click', async
 
 // Close modal with Escape key
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') hideStorageFullModal();
+    if (e.key === 'Escape') {
+        hideStorageFullModal();
+        hideHwErrorModal();
+    }
+});
+
+// =============================================================================
+// Hardware Error Modal
+// =============================================================================
+
+function showHwErrorModal(missingDevices) {
+    const modal = document.getElementById('hw-error-modal');
+    const listEl = document.getElementById('hw-missing-list');
+    if (!modal || !listEl) return;
+    listEl.innerHTML = missingDevices.map(d => `\u2717 ${d}`).join('<br>');
+    modal.style.display = 'flex';
+}
+
+function hideHwErrorModal() {
+    const modal = document.getElementById('hw-error-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// "Use Internos" button: switch toggle to internal mode and close the modal
+document.getElementById('btn-hw-modal-use-internal')?.addEventListener('click', () => {
+    const hwToggle = document.getElementById('hw-mode-toggle');
+    if (hwToggle && !hwToggle.checked) {
+        hwToggle.checked = true;
+        hwToggle.dispatchEvent(new Event('change')); // trigger the visual update listener
+    }
+    hideHwErrorModal();
+    showToast('Modo interno (ESP32) seleccionado. Clique em Iniciar Coleta.', 'info');
+});
+
+document.getElementById('btn-hw-modal-close')?.addEventListener('click', hideHwErrorModal);
+document.getElementById('hw-error-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'hw-error-modal') hideHwErrorModal();
 });

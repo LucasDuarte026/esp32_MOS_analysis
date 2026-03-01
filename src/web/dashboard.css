@@ -862,6 +862,47 @@ select.select-field::-webkit-scrollbar-thumb:hover {
     left: calc(100% - 23px);
 }
 
+/* ── Red toggle variant (Hardware Mode) ─────────────────────────────────── */
+.toggle-slider-red {
+    border-color: #e53935;
+}
+
+.toggle-slider-red::before {
+    background: #e53935;
+    box-shadow: 0 2px 8px rgba(229, 57, 53, 0.45);
+}
+
+.toggle-switch input:checked + .toggle-slider-red::before {
+    left: calc(100% - 23px);
+}
+
+/* Active label color for red toggle */
+.mode-label.mode-red.mode-active {
+    color: #e53935;
+}
+
+.mode-label.mode-red.mode-dimmed {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+/* ── Dual-toggle row layout ──────────────────────────────────────────────── */
+.dual-toggle-row {
+    display: flex;
+    gap: var(--spacing-xl);
+    align-items: flex-start;
+}
+
+.dual-toggle-col {
+    flex: 1;
+    min-width: 0;
+}
+
+.dual-toggle-divider {
+    padding-left: var(--spacing-xl);
+    border-left: 2px solid var(--border-color);
+}
+
 /* Modal Overlay */
 .modal-overlay {
     position: fixed;

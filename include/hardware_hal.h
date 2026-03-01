@@ -3,234 +3,381 @@
 
 #include <Arduino.h>
 #include <memory>
-#include "hal_interfaces.h"
+#include <cmath>
+
+// External I2C peripheral libraries
+#include <Adafruit_MCP4725.h>
+#include <Adafruit_ADS1X15.h>
 
 // ============================================================================
-// Hardware Abstraction Layer - Concrete Implementations
+// Hardware Abstraction Layer
 // ============================================================================
-// ESP32 internal DAC and ADC implementations.
+// Interfaces, configuration, and concrete implementations for voltage sources
+// (DAC) and current sensors (ADC) used in MOSFET characterization.
 //
-// Hardware Configuration:
-//   - DAC1 (GPIO25): VDS control (0-3.3V, 8-bit resolution)
-//   - DAC2 (GPIO26): VGS control (0-3.3V, 8-bit resolution)
-//   - ADC  (GPIO34): Shunt voltage reading (0-3.3V, 12-bit + oversampling)
+// Operating modes (selected at runtime via HardwareHAL::switchMode()):
+//
+//   HW_INTERNAL mode:
+//     - DAC VDS : InternalDAC ch1 (GPIO25, 8-bit)
+//     - DAC VGS : InternalDAC ch2 (GPIO26, 8-bit)
+//     - ADC     : InternalADC     (GPIO34, 12-bit + oversampling)
+//
+//   HW_EXTERNAL mode (default):
+//     - DAC VDS : InternalDAC ch1 (GPIO25, 8-bit) ← stays internal
+//     - DAC VGS : ExternalDAC MCP4725 (I2C 0x60,  12-bit)
+//     - ADC     : ExternalADC ADS1115 (I2C 0x48, A0, 16-bit + oversampling)
+//
+//   Future v4.x.x (hardware pending):
+//     - DAC VDS : ExternalDAC2 MCP4725 (I2C 0x61, 12-bit) — disabled via #if 0
 // ============================================================================
 
 namespace hal {
 
-// Pin Definitions (legacy compatibility)
-constexpr uint8_t DAC_VDS_PIN = 25;    // DAC Channel 1
-constexpr uint8_t DAC_VGS_PIN = 26;    // DAC Channel 2
-constexpr uint8_t ADC_SHUNT_PIN = 34;  // ADC1_CH6
-
-// DAC Configuration
-constexpr uint8_t DAC_RESOLUTION = 8;            // 8-bit DAC
-constexpr uint16_t DAC_MAX_VALUE = 255;          // 2^8 - 1
-constexpr float DAC_VREF = 3.3f;                 // Reference voltage
-
-// ADC Configuration
-constexpr uint8_t ADC_RESOLUTION = 12;           // 12-bit ADC
-constexpr uint16_t ADC_MAX_VALUE = 4095;         // 2^12 - 1
-constexpr float ADC_VREF = 3.3f;                 // Reference voltage (with 11dB attenuation)
-constexpr uint16_t ADC_DEFAULT_SAMPLES = 64;     // Default oversampling (was 16)
-
-// Voltage limits (for safety)
-constexpr float MAX_VDS_VOLTAGE = 3.3f;
-constexpr float MAX_VGS_VOLTAGE = 3.3f;
+// ============================================================================
+// Hardware Mode
+// ============================================================================
+/**
+ * @brief Selects which set of peripherals to use for DAC/ADC operations.
+ * Note: named HW_INTERNAL / HW_EXTERNAL to avoid clash with Arduino's
+ *       #define EXTERNAL 0 macro in Arduino.h.
+ */
+enum class HardwareMode {
+    HW_INTERNAL,  ///< All ESP32 native DAC/ADC
+    HW_EXTERNAL   ///< External I2C peripherals (MCP4725 VGS + ADS1115 ADC)
+};
 
 // ============================================================================
-// InternalDAC - ESP32 built-in 8-bit DAC
+// Abstract Interfaces
 // ============================================================================
 
 /**
- * @brief ESP32 internal DAC implementation
- * 
- * Uses dac_output_voltage() from ESP-IDF for reliable output.
- * Each instance controls one DAC channel (VDS or VGS).
+ * @brief Abstract interface for voltage source (DAC).
+ *
+ * Implementations provide voltage output with a defined range and resolution.
+ * Used for controlling VDS and VGS in MOSFET characterization.
  */
+class IVoltageSource {
+public:
+    virtual ~IVoltageSource() = default;
+
+    /** Set output voltage (clamped to valid range). */
+    virtual void    setVoltage(float voltage) = 0;
+    /** Maximum output voltage in Volts. */
+    virtual float   getMaxVoltage() const = 0;
+    /** Voltage step size in Volts (FSR / 2^bits). */
+    virtual float   getResolution() const = 0;
+    /** DAC resolution in bits (e.g., 8 for ESP32, 12 for MCP4725). */
+    virtual uint8_t getBits() const = 0;
+    /** Set output to 0 V (safety shutdown). */
+    virtual void    shutdown() = 0;
+};
+
+/**
+ * @brief Abstract interface for voltage/current sensor (ADC).
+ *
+ * Implementations provide noise-reduced voltage readings via oversampling
+ * (Insertion Sort + Trimmed Mean). Used to read the shunt resistor voltage.
+ */
+class ICurrentSensor {
+public:
+    virtual ~ICurrentSensor() = default;
+
+    /** Read voltage with oversampling applied (in Volts). */
+    virtual float    readVoltage() = 0;
+    /** Read single raw ADC value (no averaging). */
+    virtual uint16_t readRaw() = 0;
+    /** Voltage step size in Volts (FSR / full-scale). */
+    virtual float    getResolution() const = 0;
+    /** Number of samples averaged per reading. */
+    virtual uint16_t getOversamplingCount() const = 0;
+    /** Set number of samples (1–256). */
+    virtual void     setOversamplingCount(uint16_t count) = 0;
+    /** Effective number of bits (ENOB) accounting for oversampling gain. */
+    virtual float    getEffectiveBits() const = 0;
+};
+
+// ============================================================================
+// HAL Configuration
+// ============================================================================
+struct HalConfig {
+    HardwareMode hardware_mode  = HardwareMode::HW_EXTERNAL;  // Default: external
+
+    // Internal DAC pins (HW_INTERNAL mode only)
+    uint8_t  dac_vds_pin      = 25;   // DAC Channel 1 — GPIO25 → VDS (Drain voltage)
+    uint8_t  dac_vgs_pin      = 26;   // DAC Channel 2 — GPIO26 → VGS (Gate voltage)
+    uint8_t  adc_shunt_pin    = 34;   // ADC1_CH6      — GPIO34 → shunt resistor read
+
+    // Oversampling (applies to both internal and external ADC)
+    uint16_t adc_oversampling = 16;
+
+    // Reference voltages and safety limits
+    float dac_vref = 3.3f;
+    float adc_vref = 3.3f;
+    float max_vds  = 3.3f;
+    float max_vgs  = 3.3f;
+};
+
+// ============================================================================
+// Pin / Hardware Constants
+// ============================================================================
+constexpr uint8_t  DAC_VDS_PIN    = 25;  // DAC Channel 1 — controls VDS (Drain)
+constexpr uint8_t  DAC_VGS_PIN    = 26;  // DAC Channel 2 — controls VGS (Gate)
+constexpr uint8_t  ADC_SHUNT_PIN  = 34;  // ADC1_CH6       — reads shunt resistor voltage
+
+// Internal DAC (ESP32 — 8-bit, 0–3.3 V)
+constexpr uint8_t  DAC_RESOLUTION  = 8;
+constexpr uint16_t DAC_MAX_VALUE   = 255;
+constexpr float    DAC_VREF        = 3.3f;
+
+// Internal ADC (ESP32 — 12-bit, 0–3.3 V)
+constexpr uint8_t  ADC_RESOLUTION      = 12;
+constexpr uint16_t ADC_MAX_VALUE       = 4095;
+constexpr float    ADC_VREF            = 3.3f;
+constexpr uint16_t ADC_DEFAULT_SAMPLES = 64;
+
+// External DAC (MCP4725 — 12-bit, 0–3.3 V)
+constexpr uint8_t  EXT_DAC_VGS_ADDR  = 0x60;  // ADDR pin → GND
+constexpr uint8_t  EXT_DAC_VDS_ADDR  = 0x61;  // ADDR pin → VCC (future)
+constexpr uint8_t  EXT_DAC_BITS      = 12;
+constexpr uint16_t EXT_DAC_MAX_VALUE = 4095;
+constexpr float    EXT_DAC_VREF      = 3.3f;
+
+// External ADC (ADS1115 — 16-bit, GAIN_TWO → ±2.048 V FSR)
+constexpr uint8_t  EXT_ADC_ADDR    = 0x48;    // ADDR pin → GND
+constexpr uint8_t  EXT_ADC_BITS    = 16;
+constexpr float    EXT_ADC_VREF    = 2.048f;  // FSR with GAIN_TWO
+constexpr int16_t  EXT_ADC_MAX_RAW = 32767;   // Positive full-scale
+
+// Safety voltage limits
+constexpr float MAX_VDS_VOLTAGE = 3.3f;
+constexpr float MAX_VGS_VOLTAGE = 3.3f;
+
+
+// ============================================================================
+// InternalDAC — ESP32 built-in 8-bit DAC
+// ============================================================================
+// Two independent channels:
+//   channel 1 → GPIO25 → VDS (Drain voltage)   [both HW_INTERNAL and HW_EXTERNAL]
+//   channel 2 → GPIO26 → VGS (Gate voltage)    [HW_INTERNAL only; replaced by MCP4725 in HW_EXTERNAL]
 class InternalDAC : public IVoltageSource {
 public:
-    /**
-     * @brief Construct DAC controller
-     * @param channel DAC channel (1 for GPIO25, 2 for GPIO26)
-     * @param maxVoltage Maximum output voltage (default 3.3V)
-     */
     explicit InternalDAC(uint8_t channel, float maxVoltage = 3.3f);
-    
     ~InternalDAC() override = default;
-    
-    void setVoltage(float voltage) override;
-    float getMaxVoltage() const override { return maxVoltage_; }
-    float getResolution() const override { return DAC_VREF / (DAC_MAX_VALUE + 1); }
-    uint8_t getBits() const override { return DAC_RESOLUTION; }
-    void shutdown() override;
-    
-    /**
-     * @brief Initialize the DAC channel (must call before use)
-     */
-    void begin();
-    
-    /**
-     * @brief Get current DAC value (0-255)
-     */
+
+    void    setVoltage(float voltage) override;
+    float   getMaxVoltage() const override { return maxVoltage_; }
+    float   getResolution() const override { return DAC_VREF / (DAC_MAX_VALUE + 1); }
+    uint8_t getBits() const override       { return DAC_RESOLUTION; }
+    void    shutdown() override;
+
+    void    begin();
     uint8_t getCurrentValue() const { return currentValue_; }
 
 private:
     uint8_t channel_;
-    float maxVoltage_;
+    float   maxVoltage_;
     uint8_t currentValue_ = 0;
-    bool initialized_ = false;
+    bool    initialized_  = false;
 };
 
-// ============================================================================
-// InternalADC - ESP32 built-in 12-bit ADC with oversampling
-// ============================================================================
 
+// ============================================================================
+// InternalADC — ESP32 built-in 12-bit ADC with oversampling
+// ============================================================================
 /**
- * @brief ESP32 internal ADC with oversampling for noise reduction
+ * Oversampling strategy: Insertion Sort + Trimmed Mean (10% each side).
+ *   1. Collect N raw readings.
+ *   2. Sort with Insertion Sort (stack-only, MCU-friendly).
+ *   3. Discard bottom 10% and top 10%.
+ *   4. Average the central 80%.
  *
- * Sampling strategy: Insertion Sort + Trimmed Mean (10 % / 10 %).
- *   1. Collect N raw ADC readings.
- *   2. Sort with Insertion Sort (stack-only, ideal for small arrays on MCU).
- *   3. Discard the bottom 10 % and top 10 % (eliminates ADC spikes / outliers).
- *   4. Average the central 80 % of samples.
- *
- * With N=64: discards 6 samples on each side, averages 52 central samples.
- * With N=1 : trim=0, falls back to a plain single reading.
- * Effective resolution gain: ~log2(N)/2 ENOB (e.g., 64x → 12→15 ENOB).
+ * Effective ENOB gain ≈ log2(N)/2  (e.g., 64× → ~15 ENOB from 12-bit ADC).
  */
 class InternalADC : public ICurrentSensor {
 public:
-    /**
-     * @brief Construct ADC controller
-     * @param pin             GPIO pin for ADC (must be ADC1: GPIO32-39)
-     * @param oversamplingCount Number of samples per reading (1–256, default 64)
-     */
     explicit InternalADC(uint8_t pin, uint16_t oversamplingCount = ADC_DEFAULT_SAMPLES);
-    
     ~InternalADC() override = default;
-    
-    float readVoltage() override;
+
+    float    readVoltage() override;
     uint16_t readRaw() override;
-    float getResolution() const override { return ADC_VREF / (ADC_MAX_VALUE + 1); }
-    uint16_t getOversamplingCount() const override { return oversamplingCount_; }
-    void setOversamplingCount(uint16_t count) override;
-    float getEffectiveBits() const override;
-    
-    /**
-     * @brief Initialize the ADC (must call before use)
-     */
+    float    getResolution() const override         { return ADC_VREF / (ADC_MAX_VALUE + 1); }
+    uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
+    void     setOversamplingCount(uint16_t count) override;
+    float    getEffectiveBits() const override;
+
     void begin();
 
 private:
-    uint8_t pin_;
+    uint8_t  pin_;
     uint16_t oversamplingCount_;
-    bool initialized_ = false;
+    bool     initialized_ = false;
 };
 
-// ============================================================================
-// HardwareHAL - Factory class for managing hardware components
-// ============================================================================
 
+// ============================================================================
+// ExternalDAC — MCP4725 I2C 12-bit DAC
+// ============================================================================
+// Controls VGS (Gate voltage) in HW_EXTERNAL mode.
+// I2C address: 0x60 (ADDR pin tied to GND).
+//
+// No oversampling on write — MCP4725 is a true 12-bit DAC; a single I2C
+// write is deterministic and does not benefit from averaging.
+class ExternalDAC : public IVoltageSource {
+public:
+    explicit ExternalDAC(uint8_t i2cAddr, float maxVoltage = 3.3f);
+    ~ExternalDAC() override = default;
+
+    void    setVoltage(float voltage) override;
+    float   getMaxVoltage() const override { return maxVoltage_; }
+    float   getResolution() const override { return EXT_DAC_VREF / (EXT_DAC_MAX_VALUE + 1); }
+    uint8_t getBits() const override       { return EXT_DAC_BITS; }
+    void    shutdown() override;
+
+    /** Initialize the MCP4725. Returns true on success. */
+    bool begin();
+
+private:
+    uint8_t          i2cAddr_;
+    float            maxVoltage_;
+    uint16_t         currentValue_ = 0;
+    bool             initialized_  = false;
+    Adafruit_MCP4725 mcp_;
+};
+
+
+// ============================================================================
+// ExternalADC — ADS1115 I2C 16-bit ADC with oversampling
+// ============================================================================
+// Reads the shunt resistor voltage in HW_EXTERNAL mode.
+// I2C address: 0x48 (ADDR pin tied to GND). Channel: A0.
+// Gain: GAIN_TWO (±2.048 V FSR) for best resolution in 0–3.3 V range.
+//
+// Applies the same Insertion Sort + Trimmed Mean algorithm as InternalADC,
+// using ads.readADC_SingleEnded(0) as the raw sample source.
+class ExternalADC : public ICurrentSensor {
+public:
+    explicit ExternalADC(uint8_t i2cAddr = EXT_ADC_ADDR,
+                         uint16_t oversamplingCount = ADC_DEFAULT_SAMPLES);
+    ~ExternalADC() override = default;
+
+    float    readVoltage() override;
+    uint16_t readRaw() override;
+    float    getResolution() const override         { return EXT_ADC_VREF / (EXT_ADC_MAX_RAW + 1); }
+    uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
+    void     setOversamplingCount(uint16_t count) override;
+    float    getEffectiveBits() const override;
+
+    /** Initialize the ADS1115. Returns true on success. */
+    bool begin();
+
+private:
+    uint8_t          i2cAddr_;
+    uint16_t         oversamplingCount_;
+    bool             initialized_ = false;
+    Adafruit_ADS1115 ads_;
+};
+
+
+// ============================================================================
+// ExternalDAC2 — Future MCP4725 for VDS (v4.x.x, hardware pending)
+// ============================================================================
+// Planned replacement for InternalDAC VDS (channel 1 / GPIO25) once the
+// second MCP4725 hardware is available.
+// I2C address: 0x61 (ADDR pin tied to VCC).
+#if 0
+class ExternalDAC2 : public IVoltageSource {
+public:
+    explicit ExternalDAC2(float maxVoltage = 3.3f);
+    ~ExternalDAC2() override = default;
+
+    void    setVoltage(float voltage) override;
+    float   getMaxVoltage() const override { return maxVoltage_; }
+    float   getResolution() const override { return EXT_DAC_VREF / (EXT_DAC_MAX_VALUE + 1); }
+    uint8_t getBits() const override       { return EXT_DAC_BITS; }
+    void    shutdown() override;
+
+    bool begin();
+
+private:
+    float            maxVoltage_;
+    uint16_t         currentValue_ = 0;
+    bool             initialized_  = false;
+    Adafruit_MCP4725 mcp_;
+};
+#endif  // ExternalDAC2 — v4.x.x
+
+
+// ============================================================================
+// HardwareHAL — Singleton factory
+// ============================================================================
 /**
- * @brief Singleton factory for hardware abstraction layer
- * 
- * Provides access to VDS DAC, VGS DAC, and Shunt ADC through abstract interfaces.
- * Allows easy replacement with external DAC/ADC in the future.
+ * Manages VDS DAC, VGS DAC, and Shunt ADC through abstract interfaces.
+ * Call begin() once at startup, then switchMode() to change peripherals
+ * between measurements (not during a sweep).
  */
 class HardwareHAL {
 public:
-    /**
-     * @brief Get singleton instance
-     */
     static HardwareHAL& instance();
-    
-    /**
-     * @brief Initialize all hardware (DACs and ADC)
-     * @param config Optional configuration (uses defaults if not provided)
-     */
+
+    /** Initialize all hardware in the given mode. */
     void begin(const HalConfig& config = HalConfig());
-    
+
     /**
-     * @brief Get VDS voltage source (DAC)
+     * @brief Switch peripheral mode at runtime.
+     * @param mode    Target mode (HW_INTERNAL or HW_EXTERNAL)
+     * @param config  Config to use for the new mode
      */
-    IVoltageSource& getVDS() { return *dacVDS_; }
-    
+    void switchMode(HardwareMode mode, const HalConfig& config = HalConfig());
+
+    /** Current operating mode. */
+    HardwareMode getMode() const { return currentMode_; }
+
     /**
-     * @brief Get VGS voltage source (DAC)
+     * @brief Non-destructive I2C probe for external devices.
+     *        Safe to call at any time; does NOT reinitialize anything.
      */
-    IVoltageSource& getVGS() { return *dacVGS_; }
-    
-    /**
-     * @brief Get shunt voltage sensor (ADC)
-     */
-    ICurrentSensor& getShuntADC() { return *adcShunt_; }
-    
-    /**
-     * @brief Shutdown all outputs (safety)
-     */
+    struct ExternalDeviceStatus {
+        bool mcp4725_vgs = false;  ///< DAC VGS  @ 0x60
+        bool ads1115     = false;  ///< Shunt ADC @ 0x48
+        bool all_ok() const { return mcp4725_vgs && ads1115; }
+    };
+    static ExternalDeviceStatus checkExternalDevices();
+
+    IVoltageSource&  getVDS()      { return *dacVDS_; }
+    IVoltageSource&  getVGS()      { return *dacVGS_; }
+    ICurrentSensor&  getShuntADC() { return *adcShunt_; }
+
     void shutdown();
-    
-    /**
-     * @brief Check if HAL is initialized
-     */
     bool isInitialized() const { return initialized_; }
-    
-    // Delete copy constructor and assignment
-    HardwareHAL(const HardwareHAL&) = delete;
+
+    HardwareHAL(const HardwareHAL&)            = delete;
     HardwareHAL& operator=(const HardwareHAL&) = delete;
 
 private:
     HardwareHAL() = default;
-    
-    std::unique_ptr<InternalDAC> dacVDS_;
-    std::unique_ptr<InternalDAC> dacVGS_;
-    std::unique_ptr<InternalADC> adcShunt_;
-    bool initialized_ = false;
+
+    void initInternal(const HalConfig& config);
+    void initExternal(const HalConfig& config);
+
+    std::unique_ptr<IVoltageSource> dacVDS_;
+    std::unique_ptr<IVoltageSource> dacVGS_;
+    std::unique_ptr<ICurrentSensor> adcShunt_;
+
+    HardwareMode currentMode_ = HardwareMode::HW_EXTERNAL;
+    bool         initialized_ = false;
 };
 
 // ============================================================================
-// Legacy compatibility functions (deprecated but maintained for transition)
+// Legacy compatibility functions (use HardwareHAL directly instead)
 // ============================================================================
-
-/**
- * @brief Initialize the HAL (legacy function)
- * @deprecated Use HardwareHAL::instance().begin() instead
- */
-void init();
-
-/**
- * @brief Set VDS voltage (legacy function)
- * @deprecated Use HardwareHAL::instance().getVDS().setVoltage() instead
- */
-void setVDS(float voltage);
-
-/**
- * @brief Set VGS voltage (legacy function)
- * @deprecated Use HardwareHAL::instance().getVGS().setVoltage() instead
- */
-void setVGS(float voltage);
-
-/**
- * @brief Read shunt voltage (legacy function)
- * @deprecated Use HardwareHAL::instance().getShuntADC().readVoltage() instead
- */
+void  init();
+void  setVDS(float voltage);
+void  setVGS(float voltage);
 float readShuntVoltage();
+void  shutdown();
 
-/**
- * @brief Shutdown all outputs (legacy function)
- * @deprecated Use HardwareHAL::instance().shutdown() instead
- */
-void shutdown();
-
-// Helper functions (kept for backward compatibility)
-constexpr float getDACStepSize() {
-    return DAC_VREF / (DAC_MAX_VALUE + 1);
-}
-
-constexpr float getADCStepSize() {
-    return ADC_VREF / (ADC_MAX_VALUE + 1);
-}
+constexpr float getDACStepSize() { return DAC_VREF / (DAC_MAX_VALUE + 1); }
+constexpr float getADCStepSize() { return ADC_VREF / (ADC_MAX_VALUE + 1); }
 
 } // namespace hal
 
