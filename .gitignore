@@ -3,6 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+.venv
 KNOWN_ISSUES.md
 desejos futuros.txt
 platformio_override.ini
