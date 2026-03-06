@@ -246,13 +246,13 @@ SaveResult FileManager::saveMeasurement(const String& basename, const String& cs
 
 String FileManager::generateWarningMessage(int count) {
     if (count >= MAX_FILES) {
-        return String("AVISO: Limite de 200 arquivos atingido! ") +
-               "O arquivo mais antigo foi excluído. " +
-               "Atualmente: " + String(count) + " arquivos.";
+        return String("WARNING: File limit of 200 reached. ") +
+               "The oldest file was deleted. " +
+               "Current count: " + String(count) + " files.";
     } else {
-        return String("AVISO: Serão permitidos apenas 200 medições no ESP32. ") +
-               "Salve ou apague arquivos antigos. " +
-               "Atualmente: " + String(count) + "/200 arquivos armazenados.";
+        return String("WARNING: Storage is limited to 200 measurements on the ESP32. ") +
+               "Save or delete old files. " +
+               "Current count: " + String(count) + "/200 files stored.";
     }
 }
 

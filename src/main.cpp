@@ -592,8 +592,8 @@ void setup()
 
   if (MDNS.begin(WIFI_HOSTNAME))
   {
-    Serial.println("mDNS iniciado com sucesso!");
-    Serial.printf("Você pode acessar o dispositivo em: http://%s.local/\n", WIFI_HOSTNAME);
+    Serial.println("mDNS responder started.");
+    Serial.printf("Device accessible at: http://%s.local/\n", WIFI_HOSTNAME);
     MDNS.addService("http", "tcp", 80);
   }
 
@@ -664,10 +664,10 @@ void setup()
   
   server.begin();
   LOG_INFO("AsyncWebServer started on port 80");
-  Serial.println("Servidor HTTP disponível na porta 80.");
-  Serial.println("Acesse o dashboard em:");
-  Serial.println("  - Por IP: http://" + WiFi.localIP().toString() + "/");
-  Serial.printf("  - Por hostname: http://%s.local/\n", WIFI_HOSTNAME);
+  Serial.println("HTTP server listening on port 80.");
+  Serial.println("Dashboard available at:");
+  Serial.println("  - By IP:       http://" + WiFi.localIP().toString() + "/");
+  Serial.printf("  - By hostname: http://%s.local/\n", WIFI_HOSTNAME);
 }
 
 void loop()

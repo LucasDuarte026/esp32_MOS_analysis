@@ -336,10 +336,10 @@ void MOSFETController::performSweep()
     // Hardware mode metadata — records which peripherals collected the data
     if (config_.use_external_hw) {
         len = snprintf(lineBuf, sizeof(lineBuf),
-            "# Hardware: Totalmente Externo (VDS: MCP4725 0x61 12-bit, VGS: MCP4725 0x60 12-bit, ADC: ADS1115 0x48 16-bit)\n");
+            "# Hardware: Fully External (VDS: MCP4725 0x61 12-bit, VGS: MCP4725 0x60 12-bit, ADC: ADS1115 0x48 16-bit)\n");
     } else {
         len = snprintf(lineBuf, sizeof(lineBuf),
-            "# Hardware: ESP32 Interno (VDS: DAC 8-bit, VGS: DAC 8-bit, ADC: 12-bit)\n");
+            "# Hardware: ESP32 Internal (VDS: DAC 8-bit, VGS: DAC 8-bit, ADC: 12-bit)\n");
     }
     currentFile_.write((uint8_t*)lineBuf, len);
 
@@ -362,8 +362,8 @@ void MOSFETController::performSweep()
     // Temporary buffer for one curve (cleared after each outer loop iteration)
     CurveData currentCurve;
     
+    // Mode: Id vs Vds sweep (outer = VGS fixed, inner = VDS swept)
     if (sweepVDS) {
-        // MODE: Curva Id x Vds (outer=VGS, inner=VDS)
         for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
             currentVds_ = vgs; // Use for progress display (outer loop var)
             
@@ -398,7 +398,7 @@ void MOSFETController::performSweep()
             LOG_INFO("VGS=%.3fV streamed. Rows: %d", vgs, rowCount);
         }
     } else {
-        // MODE: Curva Id x Vgs (outer=VDS, inner=VGS) - default
+        // Mode: Id vs Vgs sweep (outer = VDS fixed, inner = VGS swept) — default
         for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
             currentVds_ = vds;
             
@@ -407,9 +407,11 @@ void MOSFETController::performSweep()
             currentCurve.vds = vds;
             currentCurve.rshunt = rshunt; // Pass Rshunt for SS context if needed
             
-            // R1 FIX: set VDS once per curve, not on every inner VGS iteration
+            // VDS is applied once per curve, not per VGS step.
+            // The drain supply needs to settle before the gate sweep begins.
+            // The 3x multiplier accounts for output capacitance on the MCP4725 rail.
             hal::setVDS(vds);
-            vTaskDelay(pdMS_TO_TICKS(settling * 3)); // longer settling on VDS transition
+            vTaskDelay(pdMS_TO_TICKS(settling * 3));
             
             for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
                 uint32_t t_dac  = millis();

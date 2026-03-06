@@ -1,86 +1,86 @@
 #pragma once
 
+// ============================================================================
+// Log Buffer — dual-sink logging system (Serial + in-memory ring buffer)
+// ============================================================================
+// Every LOG_* macro writes to two sinks simultaneously:
+//   1. Serial (async, via a FreeRTOS queue to avoid blocking ISRs/tasks)
+//   2. g_log_buffer — a 50-entry circular buffer readable at /api/logs
+//
+// Log level filtering:
+//   LOG_DEBUG — only emitted when GPIO12 is pulled LOW (debug jumper)
+//   LOG_INFO / LOG_WARN / LOG_ERROR — controlled at compile time via
+//   MIN_LOG_LEVEL (0 = all, 3 = errors only). Default is 0.
+// ============================================================================
+
 #include <Arduino.h>
 #include <vector>
 
+// ----------------------------------------------------------------------------
 // Log levels
+// ----------------------------------------------------------------------------
 enum LogLevel {
     LOG_LEVEL_DEBUG = 0,
-    LOG_LEVEL_INFO = 1,
-    LOG_LEVEL_WARN = 2,
+    LOG_LEVEL_INFO  = 1,
+    LOG_LEVEL_WARN  = 2,
     LOG_LEVEL_ERROR = 3
 };
 
-// Single log entry
+// ----------------------------------------------------------------------------
+// LogEntry — one entry stored in the circular buffer
+// ----------------------------------------------------------------------------
 struct LogEntry {
-    unsigned long timestamp_ms;
-    LogLevel level;
-    String message;
+    unsigned long timestamp_ms; ///< millis() at the time the message was logged
+    LogLevel      level;
+    String        message;
 };
 
-// Circular buffer for logs
+// ----------------------------------------------------------------------------
+// LogBuffer — 50-entry circular buffer, thread-safe
+// ----------------------------------------------------------------------------
 class LogBuffer {
 private:
-    static const size_t MAX_LOGS = 50;  // Keep last 50 log entries
+    static const size_t MAX_LOGS = 50;
     std::vector<LogEntry> logs_;
-    size_t write_index_ = 0;
-    bool buffer_full_ = false;
-    SemaphoreHandle_t mutex_; // Mutex for thread safety
+    size_t           write_index_ = 0;
+    bool             buffer_full_ = false;
+    SemaphoreHandle_t mutex_;
 
 public:
     LogBuffer();
-    void addLog(LogLevel level, const char* format, va_list args);
-    void addLog(LogLevel level, const String& message);
+    void   addLog(LogLevel level, const char* format, va_list args);
+    void   addLog(LogLevel level, const String& message);
     String getLogsJSON() const;
-    void clear();
+    void   clear();
 };
 
-// Global log buffer instance
+/** Global log buffer instance — written by LOG_* macros, read by /api/logs. */
 extern LogBuffer g_log_buffer;
 
 // ============================================================================
-// Debug Mode Control via GPIO12
+// Debug Mode — GPIO12 hardware trigger
 // ============================================================================
-// GPIO12 is configured with internal pull-up resistor (default HIGH).
-// When GPIO12 is connected to GND (LOW signal), debug logs are enabled
-// and exported via Serial, regardless of MIN_LOG_LEVEL setting.
+// GPIO12 is pulled HIGH internally. Connecting it to GND enables verbose
+// debug output at runtime without a firmware rebuild.
 // ============================================================================
 constexpr uint8_t DEBUG_MODE_PIN = 12;
 
-/**
- * @brief Initialize the debug mode pin (GPIO12 with pull-up)
- * Should be called during system initialization
- */
+/** Configure GPIO12 with internal pull-up. Call during system init. */
 void initDebugModePin();
 
-/**
- * @brief Check if debug mode is enabled via GPIO12
- * @return true if GPIO12 is LOW (debug mode active)
- */
+/** Returns true when GPIO12 is LOW (debug jumper installed). */
 bool isDebugModeEnabled();
 
-// Fix #2: Increased buffer size to 512 for safety
-// Macro wrappers that add to both Serial and web buffer
-// Async logging control
+/** Initialise the async Serial logging queue and writer task. */
 void initAsyncLogging();
+
+/** Enqueue a message for Serial output without blocking the calling task. */
 void logToSerialAsync(const char* msg);
 
-// Macro wrappers that add to both Serial (Async) and web buffer
+// ============================================================================
+// Internal sink macros — write to Serial (async) and the web log buffer
+// ============================================================================
 #define WEB_LOG_DEBUG(fmt, ...) do { \
-    char buf[512]; \
-    int len = snprintf(buf, sizeof(buf), "[DEBUG] " fmt, ##__VA_ARGS__); \
-    if (len >= (int)sizeof(buf)) { \
-         /* Truncated */ \
-    } \
-    logToSerialAsync(buf); \
-    /* Strip prefix for Web Buffer to match original format if needed, but keeping full msg is fine */ \
-    /* Or we can reconstruct raw message for web buffer? */ \
-    /* Original used Serial.printf("[DEBUG] "...) then snprintf(buf, fmt...) for web. */ \
-    /* For web buffer, we usually want JUST the message without [DEBUG] prefix? */ \
-    /* Existing code: snprintf(buf, ... fmt) -> g_log_buffer.addLog(LOG_LEVEL_DEBUG, buf) */ \
-    /* The LOG_LEVEL handles the type in JSON */ \
-    /* So I should format TWICE? Or format ONCE with prefix for Serial, and ONCE without for Web? */ \
-    /* Optimization: Format WITHOUT prefix. Add prefix for Serial? */ \
     char rawBuf[512]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
     logToSerialAsync(("[DEBUG] " + String(rawBuf)).c_str()); \
@@ -108,13 +108,14 @@ void logToSerialAsync(const char* msg);
     g_log_buffer.addLog(LOG_LEVEL_ERROR, rawBuf); \
 } while(0)
 
-// Backward Compatibility / Short Aliases with Build Flag filtering
+// ============================================================================
+// Public LOG_* macros — use these throughout the codebase
+// ============================================================================
 #ifndef MIN_LOG_LEVEL
 #define MIN_LOG_LEVEL 0
 #endif
 
-// LOG_DEBUG ALWAYS checks GPIO12 pin state (dynamic control)
-// Debug is only printed when GPIO12 is LOW (connected to GND)
+// LOG_DEBUG is always guarded by the hardware pin at runtime
 #define LOG_DEBUG(fmt, ...) do { \
     if (isDebugModeEnabled()) { \
         WEB_LOG_DEBUG(fmt, ##__VA_ARGS__); \

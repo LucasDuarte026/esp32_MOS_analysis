@@ -23,11 +23,11 @@ namespace wifi_manager
 static bool tryConnect(const char* ssid, const char* password, uint32_t timeoutMs)
 {
     if (ssid == nullptr || strlen(ssid) == 0) {
-        Serial.println("[WiFi] SSID vazio — impossível conectar.");
+        Serial.println("[WiFi] SSID is empty, cannot connect.");
         return false;
     }
 
-    Serial.printf("[WiFi] Tentando conectar a \"%s\"...\n", ssid);
+    Serial.printf("[WiFi] Connecting to \"%s\"...\n", ssid);
     WiFi.disconnect(true);
     vTaskDelay(pdMS_TO_TICKS(200));
 
@@ -51,7 +51,7 @@ static bool tryConnect(const char* ssid, const char* password, uint32_t timeoutM
 /// Scan visible networks and print a numbered list to Serial.
 static void scanAndPrintSSIDs()
 {
-    Serial.println("\n[WiFi] Escaneando redes disponíveis...");
+    Serial.println("\n[WiFi] Scanning for available networks...");
 
     // Switch to station mode for scan (stays there for connection later)
     WiFi.mode(WIFI_STA);
@@ -61,18 +61,18 @@ static void scanAndPrintSSIDs()
     int n = WiFi.scanNetworks();
 
     if (n <= 0) {
-        Serial.println("[WiFi] Nenhuma rede encontrada.");
+        Serial.println("[WiFi] No networks found.");
         return;
     }
 
-    Serial.printf("[WiFi] %d rede(s) encontrada(s):\n", n);
+    Serial.printf("[WiFi] %d network(s) found:\n", n);
     Serial.println("--------------------------------------------");
     for (int i = 0; i < n; i++) {
         Serial.printf("  [%2d] %-32s  RSSI: %4d dBm  %s\n",
                       i + 1,
                       WiFi.SSID(i).c_str(),
                       WiFi.RSSI(i),
-                      (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "(aberta)" : "(protegida)");
+                      (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "(open)" : "(secured)");
     }
     Serial.println("--------------------------------------------");
 
@@ -181,15 +181,15 @@ static void loadCredentials(String& ssid, String& password)
     if (savedSSID.length() > 0) {
         ssid     = savedSSID;
         password = savedPass;
-        Serial.printf("[WiFi] Credenciais carregadas do NVS — SSID: \"%s\"\n", ssid.c_str());
+        Serial.printf("[WiFi] Loaded credentials from NVS — SSID: \"%s\"\n", ssid.c_str());
     } else {
         // Nothing saved yet — use compile-time defaults
         ssid     = String(WIFI_SSID);
         password = String(WIFI_PASSWORD);
         if (ssid.length() > 0) {
-            Serial.printf("[WiFi] Usando credenciais padrão (secrets.h) — SSID: \"%s\"\n", ssid.c_str());
+            Serial.printf("[WiFi] Using compiled-in credentials (secrets.h) — SSID: \"%s\"\n", ssid.c_str());
         } else {
-            Serial.println("[WiFi] Nenhuma credencial encontrada (NVS vazio, secrets.h sem SSID).");
+            Serial.println("[WiFi] No credentials found (NVS empty, no SSID in secrets.h).");
         }
     }
 }
@@ -202,7 +202,7 @@ static void saveCredentials(const String& ssid, const String& password)
     prefs.putString(NVS_KEY_SSID, ssid);
     prefs.putString(NVS_KEY_PASS, password);
     prefs.end();
-    Serial.printf("[WiFi] Credenciais salvas no NVS — SSID: \"%s\"\n", ssid.c_str());
+    Serial.printf("[WiFi] Credentials saved to NVS — SSID: \"%s\"\n", ssid.c_str());
     LOG_INFO("WiFi credentials saved to NVS — SSID: %s", ssid.c_str());
 }
 
@@ -228,7 +228,7 @@ void connectWithFallback()
         // ---- Phase 1: try up to MAX_RETRIES times ----
         bool connected = false;
         for (uint8_t attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            Serial.printf("\n[WiFi] Tentativa %d/%d — SSID: \"%s\"\n",
+            Serial.printf("\n[WiFi] Attempt %d/%d — SSID: \"%s\"\n",
                           attempt, MAX_RETRIES, currentSSID.c_str());
 
             if (tryConnect(currentSSID.c_str(), currentPassword.c_str(), ATTEMPT_TIMEOUT_MS)) {
@@ -236,7 +236,7 @@ void connectWithFallback()
                 break;
             }
 
-            Serial.printf("[WiFi] Tentativa %d falhou.\n", attempt);
+            Serial.printf("[WiFi] Attempt %d failed.\n", attempt);
             vTaskDelay(pdMS_TO_TICKS(500));
         }
 
@@ -251,7 +251,7 @@ void connectWithFallback()
         // ---- Phase 2: all attempts failed, ask user via Serial ----
         Serial.println();
         Serial.println("============================================");
-        Serial.println("  [WiFi] Falha ao conectar (3 tentativas).");
+        Serial.println("  [WiFi] All connection attempts failed.");
         Serial.println("============================================");
 
         scanAndPrintSSIDs();
@@ -259,35 +259,35 @@ void connectWithFallback()
         // Keep asking until the user provides a valid SSID
         while (true) {
             Serial.println();
-            Serial.println("  Digite as novas credenciais e pressione Enter.");
+            Serial.println("  Enter new credentials and press Enter.");
             flushSerialRx();
             currentSSID     = readLineFromSerial("  SSID     : ");
-            currentPassword = readLineFromSerial("  Senha    : ");
+            currentPassword = readLineFromSerial("  Password : ");
 
             currentSSID.trim();
 
             if (currentSSID.length() == 0) {
-                Serial.println("  [!] SSID não pode ser vazio. Tente novamente.");
+                Serial.println("  [!] SSID cannot be empty, try again.");
                 continue;
             }
             if (currentSSID.length() > 32) {
-                Serial.println("  [!] SSID muito longo (máx. 32 caracteres). Tente novamente.");
+                Serial.println("  [!] SSID too long (max 32 chars), try again.");
                 continue;
             }
             break;
         }
 
         credentialsAreNew = true;
-        Serial.printf("\n  -> Tentando conectar a \"%s\"...\n", currentSSID.c_str());
+        Serial.printf("\n  -> Connecting to \"%s\"...\n", currentSSID.c_str());
     }
 
     // Connected!
     led_status::setState(led_status::State::STANDBY);
-    LOG_INFO("WiFi conectado!");
-    LOG_INFO("Endereço IP: %s", WiFi.localIP().toString().c_str());
+    LOG_INFO("WiFi connected.");
+    LOG_INFO("IP address: %s", WiFi.localIP().toString().c_str());
     LOG_INFO("Hostname: %s.local", WIFI_HOSTNAME);
 
-    Serial.println("\n[WiFi] Conectado com sucesso!");
+    Serial.println("\n[WiFi] Connected!");
     Serial.printf("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("[WiFi] Hostname: http://%s.local/\n", WIFI_HOSTNAME);
 }
