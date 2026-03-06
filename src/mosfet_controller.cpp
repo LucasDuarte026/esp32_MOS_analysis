@@ -336,7 +336,7 @@ void MOSFETController::performSweep()
     // Hardware mode metadata — records which peripherals collected the data
     if (config_.use_external_hw) {
         len = snprintf(lineBuf, sizeof(lineBuf),
-            "# Hardware: Misto/Externo (VDS: DAC Interno ESP32 8-bit, VGS: MCP4725 12-bit, ADC: ADS1115 16-bit)\n");
+            "# Hardware: Totalmente Externo (VDS: MCP4725 0x61 12-bit, VGS: MCP4725 0x60 12-bit, ADC: ADS1115 0x48 16-bit)\n");
     } else {
         len = snprintf(lineBuf, sizeof(lineBuf),
             "# Hardware: ESP32 Interno (VDS: DAC 8-bit, VGS: DAC 8-bit, ADC: 12-bit)\n");

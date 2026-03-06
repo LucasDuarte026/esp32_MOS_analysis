@@ -156,7 +156,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   halCfg.hardware_mode   = targetMode;
   halCfg.adc_oversampling = oversampling;
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
-  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VGS + ADS1115)" : "HW_INTERNAL (ESP32)");
+  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + MCP4725 VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32)");
   
   // Validate
   if (config.vgs_start < 0 || config.vgs_end > 5.0) {
@@ -262,16 +262,19 @@ void handleHwCheck(AsyncWebServerRequest *request)
   if (!isExternal) {
     // Internal mode — no external devices required
     json += "\"mode\":\"internal\",";
+    json += "\"mcp4725_vds\":null,";
     json += "\"mcp4725_vgs\":null,";
     json += "\"ads1115\":null,";
     json += "\"all_ok\":true";
   } else {
     auto s = hal::HardwareHAL::checkExternalDevices();
     json += "\"mode\":\"external\",";
+    json += "\"mcp4725_vds\":" + String(s.mcp4725_vds ? "true" : "false") + ",";
     json += "\"mcp4725_vgs\":" + String(s.mcp4725_vgs ? "true" : "false") + ",";
     json += "\"ads1115\":" + String(s.ads1115 ? "true" : "false") + ",";
     json += "\"all_ok\":" + String(s.all_ok() ? "true" : "false");
-    LOG_INFO("HW check: MCP4725_VGS=%s ADS1115=%s",
+    LOG_INFO("HW check: MCP4725_VDS=%s MCP4725_VGS=%s ADS1115=%s",
+             s.mcp4725_vds ? "OK" : "MISSING",
              s.mcp4725_vgs ? "OK" : "MISSING",
              s.ads1115     ? "OK" : "MISSING");
   }

@@ -267,6 +267,17 @@ select.select-field::-webkit-scrollbar-thumb:hover {
     color: var(--text-secondary);
 }
 
+/* Loading state for select elements (e.g. while fetching CSV data) */
+@keyframes selectLoadingPulse {
+    0%, 100% { border-color: #f44336; box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.15); }
+    50%       { border-color: #ff5555; box-shadow: 0 0 0 4px rgba(244, 67, 54, 0.30); }
+}
+
+.select-loading {
+    border-color: #f44336 !important;
+    animation: selectLoadingPulse 1s ease-in-out infinite;
+}
+
 /* Buttons */
 .btn {
     padding: 12px 24px;

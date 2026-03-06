@@ -156,6 +156,44 @@ void ExternalDAC::shutdown() {
 
 
 // ============================================================================
+// ExternalDAC2 (MCP4725 @ 0x61) Implementation — VDS DAC
+// ============================================================================
+
+ExternalDAC2::ExternalDAC2(float maxVoltage)
+    : maxVoltage_(maxVoltage) {}
+
+bool ExternalDAC2::begin() {
+    if (initialized_) { LOG_WARN("ExternalDAC2 (0x%02X) already initialized", EXT_DAC_VDS_ADDR); return true; }
+    if (!mcp_.begin(EXT_DAC_VDS_ADDR)) {
+        LOG_ERROR("ExternalDAC2 MCP4725 not found at I2C addr 0x%02X", EXT_DAC_VDS_ADDR);
+        return false;
+    }
+    mcp_.setVoltage(0, false);  // Start at 0 V (no EEPROM write)
+    initialized_ = true;
+    LOG_INFO("ExternalDAC2 MCP4725 initialized at 0x%02X (12-bit, %.3f mV/step)",
+             EXT_DAC_VDS_ADDR, getResolution() * 1000.0f);
+    return true;
+}
+
+void ExternalDAC2::setVoltage(float voltage) {
+    if (!initialized_) { LOG_ERROR("ExternalDAC2 0x%02X not initialized!", EXT_DAC_VDS_ADDR); return; }
+    if (voltage < 0.0f)       voltage = 0.0f;
+    if (voltage > maxVoltage_) voltage = maxVoltage_;
+
+    currentValue_ = static_cast<uint16_t>((voltage / EXT_DAC_VREF) * EXT_DAC_MAX_VALUE);
+    if (currentValue_ > EXT_DAC_MAX_VALUE) currentValue_ = EXT_DAC_MAX_VALUE;
+
+    mcp_.setVoltage(currentValue_, false);  // Write to DAC register, not EEPROM
+}
+
+void ExternalDAC2::shutdown() {
+    if (!initialized_) return;
+    mcp_.setVoltage(0, false);
+    currentValue_ = 0;
+}
+
+
+// ============================================================================
 // ExternalADC (ADS1115) Implementation
 // ============================================================================
 
@@ -314,15 +352,21 @@ void HardwareHAL::initInternal(const HalConfig& config) {
 }
 
 void HardwareHAL::initExternal(const HalConfig& config) {
-    // VDS DAC — InternalDAC channel 1 (GPIO25) — stays internal in EXTERNAL mode
-    auto vds = std::make_unique<InternalDAC>(1, config.max_vds);
-    vds->begin();
-    dacVDS_ = std::move(vds);
+    // VDS DAC — ExternalDAC2 MCP4725 (I2C 0x61, ADDR→VCC) — fully external since v4.2.0
+    auto vds = std::make_unique<ExternalDAC2>(config.max_vds);
+    if (!vds->begin()) {
+        LOG_ERROR("ExternalDAC2 (MCP4725 VDS) init failed — falling back to InternalDAC for VDS");
+        auto vds_fallback = std::make_unique<InternalDAC>(1, config.max_vds);
+        vds_fallback->begin();
+        dacVDS_ = std::move(vds_fallback);
+    } else {
+        dacVDS_ = std::move(vds);
+    }
 
-    // VGS DAC — ExternalDAC MCP4725 (I2C 0x60)
+    // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
     auto vgs = std::make_unique<ExternalDAC>(EXT_DAC_VGS_ADDR, config.max_vgs);
     if (!vgs->begin()) {
-        LOG_ERROR("ExternalDAC (MCP4725) init failed — falling back to InternalDAC for VGS");
+        LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
         auto vgs_fallback = std::make_unique<InternalDAC>(2, config.max_vgs);
         vgs_fallback->begin();
         dacVGS_ = std::move(vgs_fallback);
@@ -341,10 +385,11 @@ void HardwareHAL::initExternal(const HalConfig& config) {
         adcShunt_ = std::move(adc);
     }
 
-    LOG_INFO("  [EXTERNAL] VDS: InternalDAC GPIO%d (8-bit)",  DAC_VDS_PIN);
-    LOG_INFO("  [EXTERNAL] VGS: ExternalDAC MCP4725 0x%02X (12-bit, %.3f mV/step)",
+    LOG_INFO("  [EXTERNAL] VDS: ExternalDAC2 MCP4725 0x%02X (12-bit, %.3f mV/step)",
+             EXT_DAC_VDS_ADDR, dacVDS_->getResolution() * 1000.0f);
+    LOG_INFO("  [EXTERNAL] VGS: ExternalDAC  MCP4725 0x%02X (12-bit, %.3f mV/step)",
              EXT_DAC_VGS_ADDR, dacVGS_->getResolution() * 1000.0f);
-    LOG_INFO("  [EXTERNAL] ADC: ExternalADC ADS1115 0x%02X (16-bit, %d samples, ~%.1f ENOB)",
+    LOG_INFO("  [EXTERNAL] ADC: ExternalADC  ADS1115 0x%02X (16-bit, %d samples, ~%.1f ENOB)",
              EXT_ADC_ADDR, config.adc_oversampling, adcShunt_->getEffectiveBits());
 }
 
@@ -374,6 +419,7 @@ HardwareHAL::ExternalDeviceStatus HardwareHAL::checkExternalDevices() {
     Wire.begin();
 
     ExternalDeviceStatus status;
+    status.mcp4725_vds = probeI2CDevice(EXT_DAC_VDS_ADDR);  // 0x61
     status.mcp4725_vgs = probeI2CDevice(EXT_DAC_VGS_ADDR);  // 0x60
     status.ads1115     = probeI2CDevice(EXT_ADC_ADDR);       // 0x48
     return status;

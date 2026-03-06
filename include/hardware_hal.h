@@ -22,13 +22,10 @@
 //     - DAC VGS : InternalDAC ch2 (GPIO26, 8-bit)
 //     - ADC     : InternalADC     (GPIO34, 12-bit + oversampling)
 //
-//   HW_EXTERNAL mode (default):
-//     - DAC VDS : InternalDAC ch1 (GPIO25, 8-bit) ← stays internal
-//     - DAC VGS : ExternalDAC MCP4725 (I2C 0x60,  12-bit)
-//     - ADC     : ExternalADC ADS1115 (I2C 0x48, A0, 16-bit + oversampling)
-//
-//   Future v4.x.x (hardware pending):
-//     - DAC VDS : ExternalDAC2 MCP4725 (I2C 0x61, 12-bit) — disabled via #if 0
+//   HW_EXTERNAL mode (default) — fully I2C since v4.2.0:
+//     - DAC VDS : ExternalDAC2 MCP4725 (I2C 0x61, ADDR→VCC, 12-bit)
+//     - DAC VGS : ExternalDAC  MCP4725 (I2C 0x60, ADDR→GND, 12-bit)
+//     - ADC     : ExternalADC  ADS1115 (I2C 0x48, A0, 16-bit + oversampling)
 // ============================================================================
 
 namespace hal {
@@ -279,12 +276,11 @@ private:
 
 
 // ============================================================================
-// ExternalDAC2 — Future MCP4725 for VDS (v4.x.x, hardware pending)
+// ExternalDAC2 — MCP4725 for VDS (v4.2.0+, I2C 0x61, ADDR pin → VCC)
 // ============================================================================
-// Planned replacement for InternalDAC VDS (channel 1 / GPIO25) once the
-// second MCP4725 hardware is available.
-// I2C address: 0x61 (ADDR pin tied to VCC).
-#if 0
+// Controls VDS (Drain voltage) in HW_EXTERNAL mode since v4.2.0.
+// I2C address: 0x61 (ADDR pin tied to VCC — modified board).
+// Replaces the former InternalDAC channel 1 (GPIO25) for VDS in EXTERNAL mode.
 class ExternalDAC2 : public IVoltageSource {
 public:
     explicit ExternalDAC2(float maxVoltage = 3.3f);
@@ -296,6 +292,7 @@ public:
     uint8_t getBits() const override       { return EXT_DAC_BITS; }
     void    shutdown() override;
 
+    /** Initialize the MCP4725. Returns true on success. */
     bool begin();
 
 private:
@@ -304,7 +301,6 @@ private:
     bool             initialized_  = false;
     Adafruit_MCP4725 mcp_;
 };
-#endif  // ExternalDAC2 — v4.x.x
 
 
 // ============================================================================
@@ -337,9 +333,10 @@ public:
      *        Safe to call at any time; does NOT reinitialize anything.
      */
     struct ExternalDeviceStatus {
-        bool mcp4725_vgs = false;  ///< DAC VGS  @ 0x60
+        bool mcp4725_vds = false;  ///< DAC VDS  @ 0x61 (ADDR→VCC)
+        bool mcp4725_vgs = false;  ///< DAC VGS  @ 0x60 (ADDR→GND)
         bool ads1115     = false;  ///< Shunt ADC @ 0x48
-        bool all_ok() const { return mcp4725_vgs && ads1115; }
+        bool all_ok() const { return mcp4725_vds && mcp4725_vgs && ads1115; }
     };
     static ExternalDeviceStatus checkExternalDevices();
 

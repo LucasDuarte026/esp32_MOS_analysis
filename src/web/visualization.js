@@ -8,7 +8,7 @@
 // Visualization State
 // =============================================================================
 let currentCSVData = []; // Store full parsed CSV data
-let uniqueVDSValues = []; // Store unique VDS values found in CSV
+let uniqueVDSValues = []; // Unique values for the curve selector (VDS in VGS mode, VGS in VDS mode)
 let currentSweepMode = 'VGS'; // Sweep mode: 'VGS' (default) or 'VDS'
 let fileAnalysisMap = {}; // Global map for metadata (Vt, SS, Tangents)
 let scaleType = 'linear'; // 'linear' or 'log' for Ids axis
@@ -106,12 +106,11 @@ async function handleFileSelection(e) {
     if (deleteBtn) deleteBtn.disabled = true;      // Disable during load
 
     dbg('UI', `Iniciando carregamento: ${selectedFile}`);
-    console.log('Download button disabled for loading');
 
     if (vdsSelect) {
         vdsSelect.disabled = true;
-        vdsSelect.innerHTML = '<option value="">Carregando dados...</option>';
-        vdsSelect.style.color = '#ff5555'; // RED COLOR for loading state
+        vdsSelect.innerHTML = '<option value="">⏳ Carregando dados...</option>';
+        vdsSelect.classList.add('select-loading'); // Red pulsing border for loading state
     }
 
     document.body.style.cursor = 'wait';
@@ -125,6 +124,9 @@ async function handleFileSelection(e) {
 
         parseCSV(csvText);
 
+        // Apply UI constraints based on detected sweep mode
+        applyModeToUI(currentSweepMode);
+
         // Update Labels based on Sweep Mode
         const curveLabel = document.getElementById('curve-select-label');
         if (curveLabel) {
@@ -133,7 +135,7 @@ async function handleFileSelection(e) {
 
         // Populate Curve Selector
         if (vdsSelect) {
-            vdsSelect.style.color = ''; // Reset to default color
+            vdsSelect.classList.remove('select-loading'); // Remove loading state
             vdsSelect.innerHTML = '';
             uniqueVDSValues.forEach(val => {
                 const option = document.createElement('option');
@@ -147,12 +149,23 @@ async function handleFileSelection(e) {
             vdsSelect.disabled = false;
         }
 
+        // Enable buttons as soon as data is loaded — do not depend on updatePlotsMultiCurve()
+        // (that function has early returns that would leave buttons disabled)
+        if (downloadBtn) downloadBtn.disabled = false;
+        if (deleteBtn) deleteBtn.disabled = false;
+
         updatePlotsMultiCurve();
 
     } catch (error) {
         console.error("Error loading CSV:", error);
         showToast("Erro ao carregar arquivo de dados.", "error");
-        if (vdsSelect) vdsSelect.innerHTML = '<option value="">Erro ao carregar</option>';
+        if (vdsSelect) {
+            vdsSelect.classList.remove('select-loading');
+            vdsSelect.innerHTML = '<option value="">Erro ao carregar</option>';
+        }
+        // Re-enable buttons even on error, so user can retry or download
+        if (downloadBtn) downloadBtn.disabled = false;
+        if (deleteBtn) deleteBtn.disabled = false;
     } finally {
         document.body.style.cursor = 'default';
     }
@@ -287,6 +300,7 @@ function parseCSV(csvText) {
     if (dataStartIndex === -1) dataStartIndex = 0;
 
     const vdsSet = new Set();
+    const vgsSet = new Set();
 
     // 2. Data Parsing
     for (let i = dataStartIndex; i < lines.length; i++) {
@@ -305,7 +319,9 @@ function parseCSV(csvText) {
 
         if (!isNaN(vds) && !isNaN(vgs)) {
             const vdsRounded = Math.round(vds * 1000) / 1000;
+            const vgsRounded = Math.round(vgs * 1000) / 1000;
             vdsSet.add(vdsRounded);
+            vgsSet.add(vgsRounded);
 
             if (analysisMap[vdsRounded]) {
                 vt = analysisMap[vdsRounded].vt;
@@ -314,7 +330,7 @@ function parseCSV(csvText) {
 
             currentCSVData.push({
                 vds: vdsRounded,
-                vgs: vgs,
+                vgs: vgsRounded,
                 vsh: vsh,
                 ids: isNaN(ids) ? 0 : ids,
                 gm: isNaN(gm) ? 0 : gm,
@@ -325,15 +341,68 @@ function parseCSV(csvText) {
         }
     }
 
-    // Sort VDS values
-    uniqueVDSValues = Array.from(vdsSet).sort((a, b) => a - b);
+    // In VDS sweep mode (IdVd): the curve selector lists unique VGS values (one curve per VGS).
+    // In VGS sweep mode (IdVg): the curve selector lists unique VDS values (one curve per VDS).
+    if (currentSweepMode === 'VDS') {
+        uniqueVDSValues = Array.from(vgsSet).sort((a, b) => a - b);
+    } else {
+        uniqueVDSValues = Array.from(vdsSet).sort((a, b) => a - b);
+    }
 
-    // Post-processing
-    calculateGmForData(currentCSVData, currentSweepMode);
+    // Post-processing: Gm recalculation only relevant for VGS sweep mode
+    if (currentSweepMode !== 'VDS') {
+        calculateGmForData(currentCSVData, currentSweepMode);
+    }
     calculateSSForData(currentCSVData);
 
     fileAnalysisMap = analysisMap;
-    dbg('CSV', `Parsed ${currentCSVData.length} valid points.`);
+    dbg('CSV', `Parsed ${currentCSVData.length} valid points. Mode: ${currentSweepMode}. Curves: ${uniqueVDSValues.length}`);
+}
+
+// =============================================================================
+// Mode-Aware UI State
+// =============================================================================
+
+/**
+ * Enable or disable the Gm / SS / Vt toggle buttons depending on sweep mode.
+ * In VDS sweep mode (IdVd), those analyses don't apply to output curves.
+ */
+function applyModeToUI(sweepMode) {
+    const isVDS = sweepMode === 'VDS';
+
+    // Curves that only make sense in VGS sweep (transfer curve)
+    const analyticalCurves = ['gm', 'ss', 'vt'];
+
+    analyticalCurves.forEach(curveType => {
+        const btn = document.getElementById(`toggle-${curveType}`);
+        if (!btn) return;
+
+        if (isVDS) {
+            // Disable and visually dim
+            btn.disabled = true;
+            btn.style.opacity = '0.35';
+            btn.style.cursor = 'not-allowed';
+            btn.style.pointerEvents = 'none';
+            // Deactivate if it was on
+            btn.classList.remove('active');
+            visibleCurves[curveType] = false;
+        } else {
+            // Restore to interactive
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.style.pointerEvents = '';
+        }
+    });
+
+    // Scale controls: only relevant in VGS mode (log scale for SS)
+    const scaleSection = document.querySelector('.scale-toggle-section');
+    if (scaleSection) {
+        scaleSection.style.opacity = isVDS ? '0.35' : '';
+        scaleSection.style.pointerEvents = isVDS ? 'none' : '';
+    }
+
+    dbg('UI', `applyModeToUI: sweepMode=${sweepMode}, analytical buttons ${isVDS ? 'disabled' : 'enabled'}`);
 }
 
 // =============================================================================
@@ -411,30 +480,42 @@ function updatePlotsMultiCurve() {
     const vdsSelect = document.getElementById('vds-select');
     if (!vdsSelect || currentCSVData.length === 0) return;
 
-    dbg('PLOT', 'updatePlotsMultiCurve called');
+    dbg('PLOT', `updatePlotsMultiCurve — mode: ${currentSweepMode}`);
+
+    const isVDSMode = currentSweepMode === 'VDS';
 
     // Colors
     const colors = {
         ids: '#2196F3', gm: '#FF9800', ss: '#F44336', vt: '#4CAF50', tangent: '#E91E63'
     };
 
-    // Filter Data
-    const curveVal = parseFloat(vdsSelect.value) || (uniqueVDSValues[0] || 0);
+    // ── Filter Data ─────────────────────────────────────────────────────────
+    // curveVal is the FIXED axis value used to select one curve:
+    //   VDS mode → curveVal is a VGS value (fixed gate); X axis = VDS
+    //   VGS mode → curveVal is a VDS value (fixed drain); X axis = VGS
+    const curveVal = parseFloat(vdsSelect.value);
+    if (isNaN(curveVal)) return;
+
     let plotData;
-    if (currentSweepMode === 'VDS') {
-        plotData = currentCSVData.filter(d => Math.abs(d.vgs - curveVal) < 0.001);
+    if (isVDSMode) {
+        // IdVd: show Ids vs VDS for the selected VGS
+        plotData = currentCSVData.filter(d => Math.abs(d.vgs - curveVal) < 0.0015);
         plotData.sort((a, b) => a.vds - b.vds);
     } else {
-        plotData = currentCSVData.filter(d => Math.abs(d.vds - curveVal) < 0.001);
+        // IdVg: show Ids vs VGS for the selected VDS
+        plotData = currentCSVData.filter(d => Math.abs(d.vds - curveVal) < 0.0015);
         plotData.sort((a, b) => a.vgs - b.vgs);
     }
 
-    if (plotData.length === 0) return;
+    if (plotData.length === 0) {
+        dbg('PLOT', `No data for curveVal=${curveVal} (mode ${currentSweepMode})`);
+        return;
+    }
 
-    const xData = plotData.map(d => currentSweepMode === 'VDS' ? d.vds : d.vgs);
-    const traceName = currentSweepMode === 'VDS' ? `VGS=${curveVal}V` : `VDS=${curveVal}V`;
+    const xData = plotData.map(d => isVDSMode ? d.vds : d.vgs);
 
-    // 1. Ids Trace
+    // ── Traces ──────────────────────────────────────────────────────────────
+    // 1. Ids trace (always present)
     const traces = [{
         x: xData,
         y: plotData.map(d => Math.abs(d.ids)),
@@ -443,8 +524,8 @@ function updatePlotsMultiCurve() {
         line: { color: colors.ids, width: 2 }
     }];
 
-    // 2. Gm Trace
-    if (visibleCurves.gm) {
+    // 2. Gm trace — only in VGS mode (transfer curves)
+    if (!isVDSMode && visibleCurves.gm) {
         traces.push({
             x: xData,
             y: plotData.map(d => d.gm || 0),
@@ -455,48 +536,58 @@ function updatePlotsMultiCurve() {
         });
     }
 
+    // ── Shapes / Annotations (VGS mode only) ────────────────────────────────
     const shapes = [];
     const annotations = [];
-    const vdsKey = Math.round(curveVal * 1000) / 1000;
-    const meta = fileAnalysisMap[vdsKey];
 
-    if (meta) {
-        // Vt Line
-        if (meta.vt > 0 && visibleCurves.vt) {
-            shapes.push({
-                type: 'line',
-                x0: meta.vt, y0: 0, x1: meta.vt, y1: 1,
-                xref: 'x', yref: 'paper',
-                line: { color: colors.vt, width: 2, dash: 'dash' }
-            });
-            annotations.push({
-                x: meta.vt, y: 1, xref: 'x', yref: 'paper',
-                text: `Vt=${meta.vt.toFixed(2)}V`,
-                showarrow: false, yanchor: 'bottom', font: { color: colors.vt }
-            });
-        }
+    if (!isVDSMode) {
+        const vdsKey = Math.round(curveVal * 1000) / 1000;
+        const meta = fileAnalysisMap[vdsKey];
 
-        // SS Tangent (Only in Log Scale and SS curve active)
-        if (scaleType === 'log' && meta.ssTangent && visibleCurves.ss) {
-            traces.push({
-                x: [meta.ssTangent.x1, meta.ssTangent.x2],
-                y: [Math.pow(10, meta.ssTangent.y1), Math.pow(10, meta.ssTangent.y2)],
-                mode: 'lines',
-                name: `SS Slope (${meta.ss.toFixed(0)}mV/dec)`,
-                line: { color: colors.ss, width: 2 }
-            });
+        if (meta) {
+            // Vt vertical line
+            if (meta.vt > 0 && visibleCurves.vt) {
+                shapes.push({
+                    type: 'line',
+                    x0: meta.vt, y0: 0, x1: meta.vt, y1: 1,
+                    xref: 'x', yref: 'paper',
+                    line: { color: colors.vt, width: 2, dash: 'dash' }
+                });
+                annotations.push({
+                    x: meta.vt, y: 1, xref: 'x', yref: 'paper',
+                    text: `Vt=${meta.vt.toFixed(2)}V`,
+                    showarrow: false, yanchor: 'bottom', font: { color: colors.vt }
+                });
+            }
+
+            // SS tangent (log scale only)
+            if (scaleType === 'log' && meta.ssTangent && visibleCurves.ss) {
+                traces.push({
+                    x: [meta.ssTangent.x1, meta.ssTangent.x2],
+                    y: [Math.pow(10, meta.ssTangent.y1), Math.pow(10, meta.ssTangent.y2)],
+                    mode: 'lines',
+                    name: `SS (${meta.ss.toFixed(0)} mV/dec)`,
+                    line: { color: colors.ss, width: 2 }
+                });
+            }
         }
     }
 
-    // Layout
+    // ── Layout ───────────────────────────────────────────────────────────────
+    const plotTitle = isVDSMode
+        ? `Curva de Saída — VGS = ${curveVal.toFixed(3)} V`
+        : `Curva de Transferência — VDS = ${curveVal.toFixed(3)} V`;
+
+    const xAxisTitle = isVDSMode ? 'VDS (V)' : 'VGS (V)';
+
     const layout = {
-        title: `Curva Ids x ${currentSweepMode === 'VDS' ? 'VDS' : 'VGS'} (${traceName})`,
-        xaxis: { title: currentSweepMode === 'VDS' ? 'VDS (V)' : 'VGS (V)' },
+        title: plotTitle,
+        xaxis: { title: xAxisTitle },
         yaxis: {
-            title: 'Corrente Ids (A)',
+            title: 'Ids (A)',
             titlefont: { color: '#2196F3' },
             tickfont: { color: '#2196F3' },
-            type: scaleType,
+            type: isVDSMode ? 'linear' : scaleType,  // IdVd always linear
             exponentformat: 'e'
         },
         yaxis2: {
@@ -516,13 +607,11 @@ function updatePlotsMultiCurve() {
     };
 
     Plotly.newPlot('plot-container', traces, layout);
-    updateMetrics(plotData, meta);
 
-    // Enable buttons after successful plot
-    const downloadBtn = document.getElementById('btn-download-measurement');
-    const deleteBtn = document.getElementById('btn-delete-measurement');
-    if (downloadBtn) downloadBtn.disabled = false;
-    if (deleteBtn) deleteBtn.disabled = false;
+    // Update metrics panel (only relevant in VGS mode)
+    const vdsKey = !isVDSMode ? Math.round(curveVal * 1000) / 1000 : null;
+    const meta = vdsKey !== null ? fileAnalysisMap[vdsKey] : null;
+    updateMetrics(plotData, meta);
 }
 
 function updateMetrics(plotData, meta) {
