@@ -139,10 +139,13 @@ constexpr uint8_t  EXT_DAC_BITS      = 12;
 constexpr uint16_t EXT_DAC_MAX_VALUE = 4095;
 constexpr float    EXT_DAC_VREF      = 3.3f;
 
-// External ADC (ADS1115 — 16-bit, GAIN_TWO → ±2.048 V FSR)
+// External ADC (ADS1115 — 16-bit, configurable PGA gain via setGain())
+// Default FSR = GAIN_SIXTEEN (±0.256 V) for 1.33 Ω shunt / 20 mA max (V_shunt ~26.6 mV).
+// The FSR constant below is the compile-time default; runtime gain is applied
+// via ExternalADC::setGain(gainCode) before each sweep.
 constexpr uint8_t  EXT_ADC_ADDR    = 0x48;    // ADDR pin → GND
 constexpr uint8_t  EXT_ADC_BITS    = 16;
-constexpr float    EXT_ADC_VREF    = 2.048f;  // FSR with GAIN_TWO
+constexpr float    EXT_ADC_VREF    = 0.256f;  // Default FSR: GAIN_SIXTEEN (±0.256 V)
 constexpr int16_t  EXT_ADC_MAX_RAW = 32767;   // Positive full-scale
 
 // Safety voltage limits
@@ -267,10 +270,20 @@ public:
     /** Initialize the ADS1115. Returns true on success. */
     bool begin();
 
+    /**
+     * @brief Apply a new PGA gain to the ADS1115 at runtime.
+     * @param gainCode  Integer gain code sent from the web UI:
+     *                  0 = ±6.144 V, 1 = ±4.096 V, 2 = ±2.048 V,
+     *                  4 = ±1.024 V, 8 = ±0.512 V, 16 = ±0.256 V
+     * Also updates the internal FSR used for voltage conversion.
+     */
+    void setGain(uint8_t gainCode);
+
 private:
     uint8_t          i2cAddr_;
     uint16_t         oversamplingCount_;
     bool             initialized_ = false;
+    float            fsr_         = EXT_ADC_VREF;  // current FSR, updated by setGain()
     Adafruit_ADS1115 ads_;
 };
 

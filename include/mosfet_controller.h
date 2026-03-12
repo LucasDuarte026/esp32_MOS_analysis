@@ -42,6 +42,7 @@ struct SweepConfig {
     float rshunt;               ///< Shunt resistor (Ω); Ids = Vsh / Rshunt
     int   settling_ms;          ///< Wait after setting a new voltage before sampling (ms)
     uint16_t oversampling = 16; ///< ADC samples averaged per point (1 = off, 16 = default)
+    uint8_t  adc_gain     = 2;  ///< ADS1115 PGA gain selector: 0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
     SweepMode sweep_mode = SWEEP_VGS; ///< Which axis drives the inner loop

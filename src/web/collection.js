@@ -133,6 +133,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ? parseInt(oversamplingFactorEl ? oversamplingFactorEl.value : '64')
             : 1;
 
+        // Get ADC gain setting
+        const adcGainEl = document.getElementById('adc-gain');
+        const adcGain = adcGainEl ? parseInt(adcGainEl.value) : 2;  // default: GAIN_TWO
+
         const config = {
             vgs_start: vgsStart,
             vgs_end: vgsEnd,
@@ -143,6 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rshunt: rshunt,
             settling_ms: (settlingTime === 0 || settlingTime > 0) ? settlingTime : 0,
             oversampling: oversamplingFactor,
+            adc_gain: adcGain,
             use_external_hw: useExternalHW,
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
@@ -437,6 +442,28 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
     document.getElementById('oversampling-factor')?.addEventListener('change', updateOversamplingHint);
     document.getElementById('settling-time')?.addEventListener('input', updateOversamplingHint);
     document.addEventListener('DOMContentLoaded', updateOversamplingHint);
+})();
+
+// ADC Gain dropdown — update FSR/resolution hint
+(function () {
+    // FSR and resolution (62500 µV / 32767 LSB) per gain code
+    const GAIN_INFO = {
+          0: { fsr: '6.144', res: '187.5' },
+          1: { fsr: '4.096', res: '125.0' },
+          2: { fsr: '2.048', res:  '62.5' },
+          4: { fsr: '1.024', res:  '31.3' },
+          8: { fsr: '0.512', res:  '15.6' },
+         16: { fsr: '0.256', res:   '7.8' },
+    };
+    function updateGainHint() {
+        const sel = document.getElementById('adc-gain');
+        const hint = document.getElementById('gain-hint');
+        if (!sel || !hint) return;
+        const info = GAIN_INFO[parseInt(sel.value)] || GAIN_INFO[2];
+        hint.textContent = `FSR: ±${info.fsr} V — Res: ${info.res} µV/LSB`;
+    }
+    document.getElementById('adc-gain')?.addEventListener('change', updateGainHint);
+    document.addEventListener('DOMContentLoaded', updateGainHint);
 })();
 
 // =============================================================================

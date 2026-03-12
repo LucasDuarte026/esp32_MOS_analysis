@@ -148,6 +148,10 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   // ADC instance with halCfg.adc_oversampling, making a prior call redundant.
   LOG_INFO("ADC oversampling set to %d (%s)", oversampling, oversampling > 1 ? "enabled" : "disabled");
 
+  // ADC PGA gain (0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V)
+  uint8_t adcGain = (uint8_t)(doc["adc_gain"] | 2);  // default: GAIN_TWO
+  config.adc_gain = adcGain;
+
   // Hardware mode: true = external I2C (MCP4725 VGS + ADS1115), false = internal ESP32
   bool useExternal = doc["use_external_hw"] | true;  // default: external
   config.use_external_hw = useExternal;
@@ -156,6 +160,15 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   halCfg.hardware_mode   = targetMode;
   halCfg.adc_oversampling = oversampling;
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
+
+  // Apply PGA gain to ExternalADC (only relevant in external mode)
+  if (useExternal) {
+      // static_cast is safe: we are inside the useExternal==true branch,
+      // so getShuntADC() is guaranteed to return an ExternalADC instance.
+      // dynamic_cast is not available with -fno-rtti on ESP32.
+      auto* extAdc = static_cast<hal::ExternalADC*>(&hal::HardwareHAL::instance().getShuntADC());
+      if (extAdc) extAdc->setGain(adcGain);
+  }
   LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + MCP4725 VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32)");
   
   // Validate

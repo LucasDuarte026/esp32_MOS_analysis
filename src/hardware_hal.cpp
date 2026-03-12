@@ -209,13 +209,15 @@ bool ExternalADC::begin() {
         LOG_ERROR("ExternalADC ADS1115 not found at I2C addr 0x%02X", i2cAddr_);
         return false;
     }
-    // GAIN_TWO: ±2.048 V FSR → 0.0625 mV/LSB (best for 0–3.3 V range)
-    ads_.setGain(GAIN_TWO);
+    // GAIN_SIXTEEN: ±0.256 V FSR → 7.8 µV/LSB
+    // Chosen because V_shunt_max ≈ 26.6 mV (1.33 Ω × 20 mA) fits well within
+    // 256 mV, using GAIN_TWO (2.048 V FSR) wasted ~99% of the ADC range.
+    ads_.setGain(GAIN_SIXTEEN);
     // 860 SPS: fastest rate → ~1.16 ms/sample (vs 7.8 ms at default 128 SPS)
     // With 64 oversampling samples: ~74 ms/point (vs ~500 ms at 128 SPS)
     ads_.setDataRate(RATE_ADS1115_860SPS);
     initialized_ = true;
-    LOG_INFO("ExternalADC ADS1115 initialized at 0x%02X (16-bit, GAIN_TWO, %d samples, ~%.1f ENOB)",
+    LOG_INFO("ExternalADC ADS1115 initialized at 0x%02X (16-bit, GAIN_SIXTEEN, %d samples, ~%.1f ENOB)",
              i2cAddr_, oversamplingCount_, getEffectiveBits());
     return true;
 }
@@ -255,8 +257,8 @@ float ExternalADC::readVoltage() {
     if (count == 0) count = 1;
 
     const float avgRaw = static_cast<float>(sum) / count;
-    // ADS1115 voltage = raw * (FSR / 32767) = raw * (2.048 / 32767)
-    return avgRaw * (EXT_ADC_VREF / static_cast<float>(EXT_ADC_MAX_RAW));
+    // voltage = raw * (FSR / 32767) — FSR is set by the active PGA gain
+    return avgRaw * (fsr_ / static_cast<float>(EXT_ADC_MAX_RAW));
 }
 
 void ExternalADC::setOversamplingCount(uint16_t count) {
@@ -269,6 +271,24 @@ void ExternalADC::setOversamplingCount(uint16_t count) {
 float ExternalADC::getEffectiveBits() const {
     // ADS1115 is a true 16-bit sigma-delta ADC; oversampling still helps with noise.
     return EXT_ADC_BITS + (log2f(oversamplingCount_) / 2.0f);
+}
+
+void ExternalADC::setGain(uint8_t gainCode) {
+    adsGain_t g;
+    float fsr;
+    switch (gainCode) {
+        case  0: g = GAIN_TWOTHIRDS; fsr = 6.144f; break;
+        case  1: g = GAIN_ONE;       fsr = 4.096f; break;
+        case  2: g = GAIN_TWO;       fsr = 2.048f; break;
+        case  4: g = GAIN_FOUR;      fsr = 1.024f; break;
+        case  8: g = GAIN_EIGHT;     fsr = 0.512f; break;
+        case 16: g = GAIN_SIXTEEN;   fsr = 0.256f; break;
+        default: g = GAIN_SIXTEEN;   fsr = 0.256f; break;  // safe fallback
+    }
+    ads_.setGain(g);
+    fsr_ = fsr;
+    LOG_INFO("ExternalADC gain set: code=%d, FSR=±%.3f V (%.4f mV/LSB)",
+             gainCode, fsr, (fsr / EXT_ADC_MAX_RAW) * 1000.0f);
 }
 
 

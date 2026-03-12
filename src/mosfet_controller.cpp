@@ -276,11 +276,11 @@ void MOSFETController::performSweep()
     // Calculate total steps for progress
     int outer_steps, inner_steps;
     if (sweepVDS) {
-        outer_steps = (int)((vgs_end - vgs_start) / vgs_step) + 1;
-        inner_steps = (int)((vds_end - vds_start) / vds_step) + 1;
+        outer_steps = (int)roundf((vgs_end - vgs_start) / vgs_step) + 1;
+        inner_steps = (int)roundf((vds_end - vds_start) / vds_step) + 1;
     } else {
-        outer_steps = (int)((vds_end - vds_start) / vds_step) + 1;
-        inner_steps = (int)((vgs_end - vgs_start) / vgs_step) + 1;
+        outer_steps = (int)roundf((vds_end - vds_start) / vds_step) + 1;
+        inner_steps = (int)roundf((vgs_end - vgs_start) / vgs_step) + 1;
     }
     int total_points = outer_steps * inner_steps;
     int current_point = 0;
@@ -333,6 +333,20 @@ void MOSFETController::performSweep()
         config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
     currentFile_.write((uint8_t*)lineBuf, len);
 
+    // ADC gain metadata
+    const char* gainLabel;
+    switch (config_.adc_gain) {
+        case  0: gainLabel = "GAIN_TWOTHIRDS (±6.144 V)"; break;
+        case  1: gainLabel = "GAIN_ONE (±4.096 V)";       break;
+        case  2: gainLabel = "GAIN_TWO (±2.048 V)";       break;
+        case  4: gainLabel = "GAIN_FOUR (±1.024 V)";      break;
+        case  8: gainLabel = "GAIN_EIGHT (±0.512 V)";     break;
+        case 16: gainLabel = "GAIN_SIXTEEN (±0.256 V)";   break;
+        default: gainLabel = "GAIN_SIXTEEN (±0.256 V)";   break;
+    }
+    len = snprintf(lineBuf, sizeof(lineBuf), "# ADC Gain: %s\n", gainLabel);
+    currentFile_.write((uint8_t*)lineBuf, len);
+
     // Hardware mode metadata — records which peripherals collected the data
     if (config_.use_external_hw) {
         len = snprintf(lineBuf, sizeof(lineBuf),
@@ -347,7 +361,7 @@ void MOSFETController::performSweep()
     currentFile_.write((uint8_t*)lineBuf, len);
     
     // Column Headers
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds,vgs,vsh,ids\n");
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vsh,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
@@ -364,10 +378,12 @@ void MOSFETController::performSweep()
     
     // Mode: Id vs Vds sweep (outer = VGS fixed, inner = VDS swept)
     if (sweepVDS) {
-        for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
+        for (int i_vgs = 0; i_vgs < outer_steps && measuring_ && !cancelled_; i_vgs++) {
+            float vgs = vgs_start + i_vgs * vgs_step;
             currentVds_ = vgs; // Use for progress display (outer loop var)
             
-            for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
+            for (int i_vds = 0; i_vds < inner_steps && measuring_ && !cancelled_; i_vds++) {
+                float vds = vds_start + i_vds * vds_step;
                 hal::setVDS(vds);
                 hal::setVGS(vgs);
                 vTaskDelay(pdMS_TO_TICKS(settling));
@@ -376,10 +392,6 @@ void MOSFETController::performSweep()
                 float ids = vsh / rshunt;
                 
                 // Safe formatted write
-                // %lu = unsigned long (timestamp)
-                // %.3f = VDS, VGS (3 decimals)
-                // %.6f = Vsh (6 decimals)
-                // %.6e = Ids (scientific)
                 currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
                            (unsigned long)millis(), vds, vgs, vsh, ids);
                 
@@ -399,7 +411,8 @@ void MOSFETController::performSweep()
         }
     } else {
         // Mode: Id vs Vgs sweep (outer = VDS fixed, inner = VGS swept) — default
-        for (float vds = vds_start; vds <= vds_end && measuring_ && !cancelled_; vds += vds_step) {
+        for (int i_vds = 0; i_vds < outer_steps && measuring_ && !cancelled_; i_vds++) {
+            float vds = vds_start + i_vds * vds_step;
             currentVds_ = vds;
             
             // Reset curve buffer for this VDS value
@@ -413,7 +426,8 @@ void MOSFETController::performSweep()
             hal::setVDS(vds);
             vTaskDelay(pdMS_TO_TICKS(settling * 3));
             
-            for (float vgs = vgs_start; vgs <= vgs_end && measuring_ && !cancelled_; vgs += vgs_step) {
+            for (int i_vgs = 0; i_vgs < inner_steps && measuring_ && !cancelled_; i_vgs++) {
+                float vgs = vgs_start + i_vgs * vgs_step;
                 uint32_t t_dac  = millis();
                 hal::setVGS(vgs);
                 uint32_t t_set  = millis();

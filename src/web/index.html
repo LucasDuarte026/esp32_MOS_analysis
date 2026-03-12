@@ -214,14 +214,90 @@
                                             step="0.1" placeholder="Ex: 100">
                                         <small class="helper-text">Resistor na source para medição de corrente (Ids =
                                             Vsh / R)</small>
-                                    </div>
 
-                                    <div class="form-group">
-                                        <label for="settling-time">Tempo de Estabilização (ms)</label>
+                                        <!-- Tempo de Estabilização moved below Rshunt -->
+                                        <label for="settling-time" style="margin-top: 14px; display: block;">Tempo de
+                                            Estabilização (ms)</label>
                                         <input type="number" id="settling-time" class="input-field" min="0" max="1000"
                                             step="1" value="0">
-                                        <small class="helper-text">Tempo entre escrita DAC e leitura ADC (recomendado:
-                                            0ms)</small>
+                                        <small class="helper-text">Espera entre escrita DAC e leitura ADC (rec.:
+                                            0–5 ms)</small>
+                                    </div>
+
+                                    <!-- Ganho ADC (slot anteriormente ocupado pelo settling-time) -->
+                                    <div class="form-group">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <label for="adc-gain" style="margin: 0;">Ganho ADC (ADS1115)</label>
+                                            <span class="tooltip-trigger" tabindex="0">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                                    stroke="#888" stroke-width="2" stroke-linecap="round"
+                                                    stroke-linejoin="round">
+                                                    <circle cx="12" cy="12" r="10" />
+                                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                                </svg>
+                                                <div class="tooltip-content" style="width: 310px;">
+                                                    <strong>Ganho PGA do ADS1115</strong><br><br>
+                                                    O ganho define a <strong>faixa de tensão</strong> que o ADC consegue
+                                                    ler. Use a fórmula:<br>
+                                                    <code
+                                                        style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;">I<sub>max</sub> = FSR / R<sub>shunt</sub></code><br><br>
+                                                    <strong>Opções disponíveis:</strong><br>
+                                                    <table
+                                                        style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;">
+                                                        <tr style="opacity:.6;">
+                                                            <td>Ganho</td>
+                                                            <td>FSR</td>
+                                                            <td>Iₐ máx (R=1Ω)*</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×2/3</td>
+                                                            <td>±6.144 V</td>
+                                                            <td>~6.1 A</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×1</td>
+                                                            <td>±4.096 V</td>
+                                                            <td>~4.1 A</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×2</td>
+                                                            <td>±2.048 V</td>
+                                                            <td>~2.0 A</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×4</td>
+                                                            <td>±1.024 V</td>
+                                                            <td>~1.0 A</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×8</td>
+                                                            <td>±0.512 V</td>
+                                                            <td>~512 mA</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>×16</td>
+                                                            <td>±0.256 V</td>
+                                                            <td>~256 mA</td>
+                                                        </tr>
+                                                    </table>
+                                                    <br>
+                                                    <small>* Valores para R=1 Ω. Calcule sua faixa:<br>
+                                                        <em>I<sub>max</sub> = FSR / R<sub>shunt</sub></em><br>
+                                                        Ex: FSR ±0.256 V, R=1.33 Ω → I<sub>max</sub> ≈ 192 mA</small>
+                                                </div>
+                                            </span>
+                                        </div>
+                                        <select id="adc-gain" class="select-field">
+                                            <option value="0">×2/3 — ±6.144 V (corrente muito alta)</option>
+                                            <option value="1">×1 — ±4.096 V (corrente alta)</option>
+                                            <option value="2">×2 — ±2.048 V (médio — padrão)</option>
+                                            <option value="4">×4 — ±1.024 V (corrente baixa)</option>
+                                            <option value="8">×8 — ±0.512 V (corrente muito baixa)</option>
+                                            <option value="16" selected>×16 — ±0.256 V (corrente ultra baixa)</option>
+                                        </select>
+                                        <small class="helper-text" id="gain-hint">FSR: ±2.048 V — Res:
+                                            62.5 µV/LSB</small>
                                     </div>
 
                                     <!-- Oversampling Toggle -->
@@ -230,9 +306,11 @@
                                             <label for="oversampling-toggle" style="margin: 0;">Oversampling ADC</label>
                                             <span class="tooltip-trigger" tabindex="0">
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                                    stroke="#888" stroke-width="2">
+                                                    stroke="#888" stroke-width="2" stroke-linecap="round"
+                                                    stroke-linejoin="round">
                                                     <circle cx="12" cy="12" r="10" />
-                                                    <path d="M12 16v-4M12 8h.01" />
+                                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                                    <line x1="12" y1="17" x2="12.01" y2="17" />
                                                 </svg>
                                                 <div class="tooltip-content">
                                                     <strong>O que é Oversampling?</strong><br><br>
