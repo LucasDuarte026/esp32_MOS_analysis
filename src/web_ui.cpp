@@ -3,6 +3,7 @@
 #define USE_ASYNC_WEBSERVER
 #include "web_ui.h"
 #include "generated/web_dashboard.h"
+#include "version.h"
 
 namespace webui
 {
@@ -26,6 +27,9 @@ static void sendProgmemChunked(AsyncWebServerRequest *request, const char *conte
         memcpy_P(buffer, progmemContent + index, toSend);
         return toSend;
       });
+
+  response->addHeader("Cache-Control", "public, max-age=3600");
+  response->addHeader("ETag", "\"" SOFTWARE_VERSION "\"");
 
   request->send(response);
 }

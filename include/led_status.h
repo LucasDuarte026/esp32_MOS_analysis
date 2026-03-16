@@ -12,7 +12,8 @@
 //
 // Patterns (v2.0.0):
 //   - STANDBY:           1Hz continuous blink (0.5s on, 0.5s off)  
-//   - WIFI_DISCONNECTED: 2 fast pulses + 2s pause
+//   - WIFI_CONNECTING:   2 fast pulses + 2s pause (trying to connect)
+//   - WIFI_WAITING_USER: 3 fast pulses + 2s pause (not found, awaiting serial input)
 //   - READING_MOSFET:    3 fast pulses + 2s pause (ADC/DAC active)
 //   - MEASURING:         Frenetic blink every 0.1s (file writing)
 // ============================================================================
@@ -35,8 +36,9 @@ constexpr uint32_t RECORDING_PERIOD_MS = 100; // Frenetic blink period
  */
 enum class State {
     STANDBY,            // Normal operation - 1Hz blink (1s cycle)
-    WIFI_DISCONNECTED,  // 2 pulses + 2s pause
-    READING_MOSFET,     // 3 pulses + 2s pause (NEW - ADC/DAC reading active)
+    WIFI_CONNECTING,    // 2 pulses + 2s pause (trying to connect)
+    WIFI_WAITING_USER,  // 3 pulses + 2s pause (no wifi found, waiting for user input)
+    READING_MOSFET,     // 3 pulses + 2s pause (ADC/DAC reading active)
     MEASURING           // Frenetic blink every 0.1s (file writing)
 };
 

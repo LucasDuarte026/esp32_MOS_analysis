@@ -178,6 +178,9 @@ async function handleDownload() {
         return;
     }
 
+    // Show immediate feedback
+    showToast(`⏳ Processando download: ${selectedValue}...`, 'info');
+
     try {
         const response = await fetch(`/api/files/download?file=${encodeURIComponent(selectedValue)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -191,6 +194,8 @@ async function handleDownload() {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        
+        showToast(`✅ Download concluído!`, 'success');
     } catch (error) {
         alert(`❌ Erro ao baixar CSV: ${error.message}`);
     }
@@ -606,7 +611,8 @@ function updatePlotsMultiCurve() {
         font: { color: '#e0e0e0' }
     };
 
-    Plotly.newPlot('plot-container', traces, layout);
+    // Use Plotly.react instead of newPlot, it is much faster and reuses existing SVG DOM avoiding flicker
+    Plotly.react('plot-container', traces, layout);
 
     // Update metrics panel (only relevant in VGS mode)
     const vdsKey = !isVDSMode ? Math.round(curveVal * 1000) / 1000 : null;

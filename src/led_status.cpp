@@ -71,9 +71,14 @@ namespace {
                     vTaskDelay(pdMS_TO_TICKS(STANDBY_PERIOD_MS / 2));
                     break;
                     
-                case State::WIFI_DISCONNECTED:
+                case State::WIFI_CONNECTING:
                     // 2 pulses + 2s pause
                     playPulsePattern(2);
+                    break;
+                    
+                case State::WIFI_WAITING_USER:
+                    // 3 pulses + 2s pause
+                    playPulsePattern(3);
                     break;
                     
                 case State::READING_MOSFET:
@@ -142,7 +147,8 @@ State getState() {
 const char* getStateName(State state) {
     switch (state) {
         case State::STANDBY: return "STANDBY";
-        case State::WIFI_DISCONNECTED: return "WIFI_DISCONNECTED";
+        case State::WIFI_CONNECTING: return "WIFI_CONNECTING";
+        case State::WIFI_WAITING_USER: return "WIFI_WAITING_USER";
         case State::READING_MOSFET: return "READING_MOSFET";
         case State::MEASURING: return "MEASURING";
         default: return "UNKNOWN";
@@ -152,10 +158,10 @@ const char* getStateName(State state) {
 void updateWiFiStatus(bool isConnected) {
     if (!isConnected) {
         // WiFi lost - save current state and switch to disconnected pattern
-        if (g_current_state != State::WIFI_DISCONNECTED) {
+        if (g_current_state != State::WIFI_CONNECTING && g_current_state != State::WIFI_WAITING_USER) {
             g_saved_state = g_current_state;
             g_wifi_override = true;
-            setState(State::WIFI_DISCONNECTED);
+            setState(State::WIFI_CONNECTING);
         }
     } else {
         // WiFi restored - return to previous state

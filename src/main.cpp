@@ -381,8 +381,45 @@ void handleDownloadFile(AsyncWebServerRequest *request)
   
   String fullPath = String(FileManager::MEASUREMENTS_DIR) + "/" + filename;
   
-  // Use chunked response for large files
-  request->send(FFat, fullPath.c_str(), "text/csv", true);
+  if (!FFat.exists(fullPath)) {
+    request->send(404, "text/plain", "File not found");
+    return;
+  }
+
+  // Use a chunked response to send the file piece by piece, 
+  // preventing TCP disconnects / WDT resets on large CSVs.
+  File file = FFat.open(fullPath, FILE_READ);
+  if (!file) {
+    request->send(500, "text/plain", "Failed to open file for reading");
+    return;
+  }
+
+  // Create a shared pointer to keep the file open during the async transfer
+  // The custom deleter will ensure it gets closed when the response finishes
+  auto sharedFile = std::shared_ptr<File>(new File(file), [](File* f) {
+      if (f) {
+          f->close();
+          delete f;
+      }
+  });
+
+  AsyncWebServerResponse *response = request->beginChunkedResponse("text/csv", 
+    [sharedFile](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+      
+      if (!sharedFile || !*sharedFile || !sharedFile->available()) {
+        return 0; // EOF
+      }
+      
+      // Read a chunk up to maxLen
+      size_t bytesRead = sharedFile->read(buffer, maxLen);
+      return bytesRead;
+    }
+  );
+
+  // Force download behavior in browser
+  response->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+  addCORSHeaders(response);
+  request->send(response);
 }
 
 void handleDeleteFile(AsyncWebServerRequest *request)

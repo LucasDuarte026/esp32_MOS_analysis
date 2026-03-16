@@ -111,7 +111,7 @@ async function updateSystemInfo() {
 // Start monitoring
 document.addEventListener('DOMContentLoaded', () => {
     updateSystemInfo();
-    setInterval(updateSystemInfo, 1000);
+    setInterval(updateSystemInfo, 3000); // Reduced polling from 1s to 3s for stability
 });
 
 // =============================================================================
@@ -186,6 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // =============================================================================
 
 // Fetch and display logs from ESP32
+let lastLogCount = 0;
+
 async function updateLogs() {
     try {
         const response = await fetch('/api/logs');
@@ -194,9 +196,18 @@ async function updateLogs() {
         const logsContainer = document.getElementById('logs-container');
         if (!logsContainer) return;
 
-        logsContainer.innerHTML = '';
+        // Only update DOM if there are new logs or reset
+        if (logs.length === lastLogCount) {
+            return; 
+        } else if (logs.length < lastLogCount) {
+            // Logs were cleared on server
+            logsContainer.innerHTML = '';
+        }
 
-        logs.forEach(log => {
+        // Get only the logs we haven't rendered yet
+        const newLogs = logs.slice(Math.max(0, logsContainer.childElementCount));
+        
+        newLogs.forEach(log => {
             const logEntry = document.createElement('div');
             logEntry.className = 'log-entry';
 
@@ -243,6 +254,13 @@ async function updateLogs() {
 
             logsContainer.appendChild(logEntry);
         });
+
+        // Store new count and autoscroll to bottom if there were updates
+        lastLogCount = logs.length;
+        if (newLogs.length > 0) {
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
     } catch (error) {
         // console.error('Error fetching logs:', error);
     }
@@ -250,7 +268,7 @@ async function updateLogs() {
 
 document.addEventListener('DOMContentLoaded', () => {
     updateLogs();
-    setInterval(updateLogs, 2000);
+    setInterval(updateLogs, 5000); // Reduced polling from 2s to 5s for stability
 
     // Logs Window Controls
     const logsWindow = document.getElementById('floating-logs-window');
@@ -298,6 +316,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Clear logs button (floating)
         document.getElementById('btn-clear-logs-float')?.addEventListener('click', () => {
             document.getElementById('logs-container').innerHTML = '';
+            lastLogCount = 0;
+            fetch('/api/logs/clear', { method: 'POST' }).catch(console.error);
         });
     }
 });

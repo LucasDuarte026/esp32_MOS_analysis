@@ -212,7 +212,7 @@ static void saveCredentials(const String& ssid, const String& password)
 
 void connectWithFallback()
 {
-    led_status::setState(led_status::State::WIFI_DISCONNECTED);
+    led_status::setState(led_status::State::WIFI_CONNECTING);
 
     String currentSSID;
     String currentPassword;
@@ -249,6 +249,8 @@ void connectWithFallback()
         }
 
         // ---- Phase 2: all attempts failed, ask user via Serial ----
+        led_status::setState(led_status::State::WIFI_WAITING_USER);
+
         Serial.println();
         Serial.println("============================================");
         Serial.println("  [WiFi] All connection attempts failed.");
@@ -279,6 +281,7 @@ void connectWithFallback()
 
         credentialsAreNew = true;
         Serial.printf("\n  -> Connecting to \"%s\"...\n", currentSSID.c_str());
+        led_status::setState(led_status::State::WIFI_CONNECTING);
     }
 
     // Connected!
