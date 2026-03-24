@@ -79,10 +79,17 @@ class ICurrentSensor {
 public:
     virtual ~ICurrentSensor() = default;
 
-    /** Read voltage with oversampling applied (in Volts). */
+    /** Read voltage from the default/primary channel (oversampled). */
     virtual float    readVoltage() = 0;
-    /** Read single raw ADC value (no averaging). */
+    
+    /** Read voltage from a specific channel (oversampled). */
+    virtual float    readVoltage(uint8_t channel) = 0;
+    
+    /** Read single raw ADC value from default channel (no averaging). */
     virtual uint16_t readRaw() = 0;
+    
+    /** Read single raw ADC value from a specific channel (no averaging). */
+    virtual uint16_t readRaw(uint8_t channel) = 0;
     /** Voltage step size in Volts (FSR / full-scale). */
     virtual float    getResolution() const = 0;
     /** Number of samples averaged per reading. */
@@ -91,6 +98,9 @@ public:
     virtual void     setOversamplingCount(uint16_t count) = 0;
     /** Effective number of bits (ENOB) accounting for oversampling gain. */
     virtual float    getEffectiveBits() const = 0;
+    
+    /** Configure PGA gain if supported (blank default). */
+    virtual void     setGain(uint8_t gainCode, bool silent = false) {}
 };
 
 // ============================================================================
@@ -134,10 +144,9 @@ constexpr uint16_t ADC_DEFAULT_SAMPLES = 64;
 
 // External DAC (MCP4725 — 12-bit, 0–3.3 V)
 constexpr uint8_t  EXT_DAC_VGS_ADDR  = 0x60;  // ADDR pin → GND
-constexpr uint8_t  EXT_DAC_VDS_ADDR  = 0x61;  // ADDR pin → VCC (future)
 constexpr uint8_t  EXT_DAC_BITS      = 12;
 constexpr uint16_t EXT_DAC_MAX_VALUE = 4095;
-constexpr float    EXT_DAC_VREF      = 3.3f;
+constexpr float    EXT_DAC_VREF      = 5.0f; // Updated to 5.0V based on hardware readings
 
 // External ADC (ADS1115 — 16-bit, configurable PGA gain via setGain())
 // Default FSR = GAIN_SIXTEEN (±0.256 V) for 1.33 Ω shunt / 20 mA max (V_shunt ~26.6 mV).
@@ -145,7 +154,7 @@ constexpr float    EXT_DAC_VREF      = 3.3f;
 // via ExternalADC::setGain(gainCode) before each sweep.
 constexpr uint8_t  EXT_ADC_ADDR    = 0x48;    // ADDR pin → GND
 constexpr uint8_t  EXT_ADC_BITS    = 16;
-constexpr float    EXT_ADC_VREF    = 0.256f;  // Default FSR: GAIN_SIXTEEN (±0.256 V)
+constexpr float    EXT_ADC_VREF    = 6.144f;  // Default FSR: GAIN_TWOTHIRDS (±6.144 V)
 constexpr int16_t  EXT_ADC_MAX_RAW = 32767;   // Positive full-scale
 
 // Safety voltage limits
@@ -199,7 +208,9 @@ public:
     ~InternalADC() override = default;
 
     float    readVoltage() override;
+    float    readVoltage(uint8_t channel) override;
     uint16_t readRaw() override;
+    uint16_t readRaw(uint8_t channel) override;
     float    getResolution() const override         { return ADC_VREF / (ADC_MAX_VALUE + 1); }
     uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
     void     setOversamplingCount(uint16_t count) override;
@@ -229,16 +240,21 @@ public:
 
     void    setVoltage(float voltage) override;
     float   getMaxVoltage() const override { return maxVoltage_; }
-    float   getResolution() const override { return EXT_DAC_VREF / (EXT_DAC_MAX_VALUE + 1); }
+    float   getResolution() const override { return extDacVref_ / (EXT_DAC_MAX_VALUE + 1); }
     uint8_t getBits() const override       { return EXT_DAC_BITS; }
     void    shutdown() override;
 
     /** Initialize the MCP4725. Returns true on success. */
     bool begin();
 
+    /** Set the actual MCP4725 supply voltage for accurate DAC code scaling.
+     *  Valid range: 4.0 – 5.5 V. Values outside range are clamped and logged. */
+    void setExtDacVref(float vref);
+
 private:
     uint8_t          i2cAddr_;
     float            maxVoltage_;
+    float            extDacVref_  = EXT_DAC_VREF; // runtime VDD, updated via setExtDacVref()
     uint16_t         currentValue_ = 0;
     bool             initialized_  = false;
     Adafruit_MCP4725 mcp_;
@@ -261,7 +277,10 @@ public:
     ~ExternalADC() override = default;
 
     float    readVoltage() override;
+    float    readVoltage(uint8_t channel) override;
+    float    readVoltage(uint8_t channel, uint8_t gainOverride); // New overload
     uint16_t readRaw() override;
+    uint16_t readRaw(uint8_t channel) override;
     float    getResolution() const override         { return EXT_ADC_VREF / (EXT_ADC_MAX_RAW + 1); }
     uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
     void     setOversamplingCount(uint16_t count) override;
@@ -277,43 +296,19 @@ public:
      *                  4 = ±1.024 V, 8 = ±0.512 V, 16 = ±0.256 V
      * Also updates the internal FSR used for voltage conversion.
      */
-    void setGain(uint8_t gainCode);
+    void setGain(uint8_t gainCode, bool silent = false);
 
 private:
     uint8_t          i2cAddr_;
     uint16_t         oversamplingCount_;
     bool             initialized_ = false;
     float            fsr_         = EXT_ADC_VREF;  // current FSR, updated by setGain()
+    uint8_t          currentGainCode_ = 0;         // default to GAIN_TWOTHIRDS (0)
     Adafruit_ADS1115 ads_;
 };
 
 
-// ============================================================================
-// ExternalDAC2 — MCP4725 for VDS (v4.2.0+, I2C 0x61, ADDR pin → VCC)
-// ============================================================================
-// Controls VDS (Drain voltage) in HW_EXTERNAL mode since v4.2.0.
-// I2C address: 0x61 (ADDR pin tied to VCC — modified board).
-// Replaces the former InternalDAC channel 1 (GPIO25) for VDS in EXTERNAL mode.
-class ExternalDAC2 : public IVoltageSource {
-public:
-    explicit ExternalDAC2(float maxVoltage = 3.3f);
-    ~ExternalDAC2() override = default;
 
-    void    setVoltage(float voltage) override;
-    float   getMaxVoltage() const override { return maxVoltage_; }
-    float   getResolution() const override { return EXT_DAC_VREF / (EXT_DAC_MAX_VALUE + 1); }
-    uint8_t getBits() const override       { return EXT_DAC_BITS; }
-    void    shutdown() override;
-
-    /** Initialize the MCP4725. Returns true on success. */
-    bool begin();
-
-private:
-    float            maxVoltage_;
-    uint16_t         currentValue_ = 0;
-    bool             initialized_  = false;
-    Adafruit_MCP4725 mcp_;
-};
 
 
 // ============================================================================
@@ -346,16 +341,24 @@ public:
      *        Safe to call at any time; does NOT reinitialize anything.
      */
     struct ExternalDeviceStatus {
-        bool mcp4725_vds = false;  ///< DAC VDS  @ 0x61 (ADDR→VCC)
         bool mcp4725_vgs = false;  ///< DAC VGS  @ 0x60 (ADDR→GND)
-        bool ads1115     = false;  ///< Shunt ADC @ 0x48
-        bool all_ok() const { return mcp4725_vds && mcp4725_vgs && ads1115; }
+        bool ads1115      = false;  ///< Shunt ADC @ 0x48
+        bool all_ok() const { return mcp4725_vgs && ads1115; }
     };
     static ExternalDeviceStatus checkExternalDevices();
 
     IVoltageSource&  getVDS()      { return *dacVDS_; }
     IVoltageSource&  getVGS()      { return *dacVGS_; }
     ICurrentSensor&  getShuntADC() { return *adcShunt_; }
+    ExternalDAC*     getExternalVGS();  // returns nullptr if not ExternalDAC
+    
+    /** Specialized reading methods assuming external ADC mapped to A0/A1/A2 */
+    float readShuntVoltage(); 
+    float readVD_Actual();
+    float readVG_Actual();
+
+    /** Configure ADS1115 PGA gain (0..16) */
+    void setADC_Gain(uint8_t gainCode);
 
     void shutdown();
     bool isInitialized() const { return initialized_; }
@@ -384,6 +387,9 @@ void  init();
 void  setVDS(float voltage);
 void  setVGS(float voltage);
 float readShuntVoltage();
+float readVD_Actual();
+float readVG_Actual();
+void  setADC_Gain(uint8_t gainCode);
 void  shutdown();
 
 constexpr float getDACStepSize() { return DAC_VREF / (DAC_MAX_VALUE + 1); }

@@ -43,6 +43,7 @@ struct SweepConfig {
     int   settling_ms;          ///< Wait after setting a new voltage before sampling (ms)
     uint16_t oversampling = 16; ///< ADC samples averaged per point (1 = off, 16 = default)
     uint8_t  adc_gain     = 2;  ///< ADS1115 PGA gain selector: 0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V
+    float    ext_dac_vref = 5.0f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
     SweepMode sweep_mode = SWEEP_VGS; ///< Which axis drives the inner loop
@@ -62,6 +63,10 @@ struct DataPoint {
     float gm;   ///< Transconductance: dIds/dVgs at this point (S)
     float vt;   ///< Threshold voltage extrapolated from peak Gm (V)
     float ss;   ///< Subthreshold swing (mV/decade)
+
+    // True readings from multichannel ADC
+    float vd_read; ///< Actual VDS measured (V)
+    float vg_read; ///< Actual VGS measured (V)
 };
 
 // ============================================================================
@@ -153,6 +158,8 @@ private:
         std::vector<float>    ids;
         std::vector<float>    gm;
         std::vector<float>    vsh;
+        std::vector<float>    vd_read;
+        std::vector<float>    vg_read;
         std::vector<uint32_t> timestamps;
 
         // Tangent line endpoints in (VGS, log10(Ids)) space for dashboard overlay

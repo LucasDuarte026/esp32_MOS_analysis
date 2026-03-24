@@ -360,16 +360,22 @@ void MOSFETController::performSweep()
     len = snprintf(lineBuf, sizeof(lineBuf), "# Firmware: %s\n", SOFTWARE_VERSION);
     currentFile_.write((uint8_t*)lineBuf, len);
     
-    // Column Headers
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vsh,ids\n");
+    // Configure ADC gain for shunt measurement
+    if (config_.use_external_hw) {
+        hal::setADC_Gain(config_.adc_gain);
+    }
+
+    // Column Headers - Restoring original positions, renaming back to vd, vg as requested
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vsh,ids,vd_read,vg_read\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
-    LOG_INFO("Starting %s sweep - Oversampling: %s (%dx), Settling: %dms", 
-        sweepVDS ? "VDS" : "VGS",
+    LOG_INFO("Starting %s sweep - Oversampling: %s (%dx), Settling: %dms, GainCode: %d", 
+        sweepVDS ? "VD" : "VG",
         config_.oversampling > 1 ? "ON" : "OFF", 
         config_.oversampling, 
-        config_.settling_ms);
+        config_.settling_ms,
+        config_.adc_gain);
     
     int rowCount = 0;
     
@@ -388,12 +394,14 @@ void MOSFETController::performSweep()
                 hal::setVGS(vgs);
                 vTaskDelay(pdMS_TO_TICKS(settling));
                 
-                float vsh = readAnalogVoltage();
+                float vsh = hal::readShuntVoltage();
                 float ids = vsh / rshunt;
+                float vd_actual = hal::readVD_Actual();
+                float vg_actual = hal::readVG_Actual();
                 
-                // Safe formatted write
-                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
-                           (unsigned long)millis(), vds, vgs, vsh, ids);
+                // Safe formatted write - vd, vg, vsh naming
+                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e,%.3f,%.3f\n", 
+                           (unsigned long)millis(), vds, vgs, vsh, ids, vd_actual, vg_actual);
                 
                 rowCount++;
                 current_point++;
@@ -433,19 +441,23 @@ void MOSFETController::performSweep()
                 uint32_t t_set  = millis();
                 if (settling > 0) vTaskDelay(pdMS_TO_TICKS(settling));
                 uint32_t t_adc  = millis();
-                float vsh = readAnalogVoltage();
+                float vsh = hal::readShuntVoltage();
                 uint32_t t_done = millis();
                 float ids = vsh / rshunt;
+                float vd_actual = hal::readVD_Actual();
+                float vg_actual = hal::readVG_Actual();
                 
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
                 currentCurve.ids.push_back(ids);
                 currentCurve.vsh.push_back(vsh);
+                currentCurve.vd_read.push_back(vd_actual);
+                currentCurve.vg_read.push_back(vg_actual);
                 currentCurve.timestamps.push_back(millis());
                 
                 // Safe write
-                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e\n", 
-                           (unsigned long)millis(), vds, vgs, vsh, ids);
+                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e,%.3f,%.3f\n", 
+                           (unsigned long)millis(), vds, vgs, vsh, ids, vd_actual, vg_actual);
                 
                 rowCount++;
                 current_point++;
@@ -610,8 +622,8 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     len = snprintf(lineBuf, sizeof(lineBuf), "#\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
-    // Column Headers
-    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vds,vgs,vsh,ids,gm\n");
+    // Column Headers - Old names vd, vg and original positions, extra reads at the right
+    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vd,vg,vsh,ids,gm,vd_read,vg_read\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     LOG_INFO("Header written: %u bytes", (unsigned)totalWritten);
@@ -621,13 +633,15 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     // Write Data - use snprintf for reliable formatting
     for(const auto& res : results) {
         for(size_t i=0; i<res.vgs.size(); i++) {
-            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.4f,%.6e,%.6e\n",
+            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.4f,%.6e,%.6e,%.3f,%.3f\n",
                 (unsigned long)res.timestamps[i],
                 res.vds,
                 res.vgs[i],
                 res.vsh[i],
                 res.ids[i],
-                res.gm[i]
+                res.gm[i],
+                res.vd_read[i],
+                res.vg_read[i]
             );
             
             size_t written = file.write((uint8_t*)lineBuf, len);

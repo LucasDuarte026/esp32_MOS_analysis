@@ -3,6 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <sys/time.h>
 #include <time.h>
 #include "version.h"
@@ -33,6 +34,8 @@ namespace
 {
 constexpr uint8_t LED_PIN = 2;
 
+// Persistent configuration (NVS)
+Preferences prefs;
 
 // ESPAsyncWebServer - Non-blocking!
 AsyncWebServer server(80);
@@ -152,6 +155,26 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   uint8_t adcGain = (uint8_t)(doc["adc_gain"] | 2);  // default: GAIN_TWO
   config.adc_gain = adcGain;
 
+  // Parse ext_dac_vref from request or fall back to NVS-stored value
+  float extDacVref = doc["ext_dac_vref"] | 5.0f;
+  if (doc.containsKey("ext_dac_vref")) {
+    // Validate range 4.0 - 5.5 V
+    if (extDacVref < 4.0f || extDacVref > 5.5f) {
+      LOG_ERROR("ext_dac_vref %.2f out of range [4.0, 5.5]", extDacVref);
+      AsyncWebServerResponse *response = request->beginResponse(400, "application/json",
+        "{\"error\":\"out_of_range_vref\",\"message\":\"VDD do MCP4725 deve estar entre 4.0V e 5.5V\"}");
+      addCORSHeaders(response);
+      request->send(response);
+      return;
+    }
+    // Persist to NVS
+    prefs.begin("config", false);
+    prefs.putFloat("ext_dac_vref", extDacVref);
+    prefs.end();
+    LOG_INFO("ext_dac_vref = %.3f V saved to NVS", extDacVref);
+  }
+  config.ext_dac_vref = extDacVref;
+
   // Hardware mode: true = external I2C (MCP4725 VGS + ADS1115), false = internal ESP32
   bool useExternal = doc["use_external_hw"] | true;  // default: external
   config.use_external_hw = useExternal;
@@ -160,6 +183,14 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   halCfg.hardware_mode   = targetMode;
   halCfg.adc_oversampling = oversampling;
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
+
+  // Apply VDD reference to ExternalDAC VGS
+  {
+    auto* extDac = hal::HardwareHAL::instance().getExternalVGS();
+    if (extDac) {
+      extDac->setExtDacVref(extDacVref);
+    }
+  }
 
   // Apply PGA gain to ExternalADC (only relevant in external mode)
   if (useExternal) {
@@ -282,12 +313,10 @@ void handleHwCheck(AsyncWebServerRequest *request)
   } else {
     auto s = hal::HardwareHAL::checkExternalDevices();
     json += "\"mode\":\"external\",";
-    json += "\"mcp4725_vds\":" + String(s.mcp4725_vds ? "true" : "false") + ",";
     json += "\"mcp4725_vgs\":" + String(s.mcp4725_vgs ? "true" : "false") + ",";
     json += "\"ads1115\":" + String(s.ads1115 ? "true" : "false") + ",";
     json += "\"all_ok\":" + String(s.all_ok() ? "true" : "false");
-    LOG_INFO("HW check: MCP4725_VDS=%s MCP4725_VGS=%s ADS1115=%s",
-             s.mcp4725_vds ? "OK" : "MISSING",
+    LOG_INFO("HW check: MCP4725_VGS=%s ADS1115=%s",
              s.mcp4725_vgs ? "OK" : "MISSING",
              s.ads1115     ? "OK" : "MISSING");
   }
@@ -573,6 +602,19 @@ void handleEmailStatus(AsyncWebServerRequest *request)
   request->send(response);
 }
 
+void handleGetConfig(AsyncWebServerRequest *request)
+{
+  prefs.begin("config", true); // read-only
+  float vref = prefs.getFloat("ext_dac_vref", 5.0f);
+  prefs.end();
+
+  String json = "{\"ext_dac_vref\":" + String(vref, 2) + "}";
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  addCORSHeaders(response);
+  request->send(response);
+}
+
 void handleNotFound(AsyncWebServerRequest *request)
 {
   LOG_WARN("HTTP 404: %s %s", 
@@ -593,7 +635,19 @@ void setup()
   delay(100);
   initAsyncLogging();
   debug_mode::init();
-  
+
+  // Load persisted config from NVS and apply to HAL
+  prefs.begin("config", false); // Open in read-write to ensure namespace exists
+  if (!prefs.isKey("ext_dac_vref")) {
+    prefs.putFloat("ext_dac_vref", 5.0f);
+  }
+  float storedVref = prefs.getFloat("ext_dac_vref", 5.0f);
+  prefs.end();
+  LOG_INFO("NVS: ext_dac_vref loaded = %.3f V", storedVref);
+  // ExternalDAC will be initialized by mosfet_controller.begin() → hal::init();
+  // Vref will be applied after the first switchMode() call.
+  // Store globally so handleStartMeasurement can use it as default.
+
   if (!FileManager::init()) {
     LOG_ERROR("File system initialization failed");
   }
@@ -632,6 +686,7 @@ void setup()
   server.on("/email.js", HTTP_GET, webui::sendEmailJs);
   
   // API endpoints
+  server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/temperature", HTTP_GET, handleTemperature);
   server.on("/api/usb_status", HTTP_GET, handleUSBStatus);

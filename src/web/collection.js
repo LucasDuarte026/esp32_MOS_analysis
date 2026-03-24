@@ -49,6 +49,17 @@ async function loadMeasurementList() {
 document.addEventListener('DOMContentLoaded', () => {
     loadMeasurementList();
     setInterval(loadMeasurementList, 10000);
+
+    // Restore persisted ext_dac_vref from NVS via /api/config
+    fetch('/api/config')
+        .then(r => r.json())
+        .then(cfg => {
+            const el = document.getElementById('ext-dac-vref');
+            if (el && cfg.ext_dac_vref != null) {
+                el.value = parseFloat(cfg.ext_dac_vref).toFixed(1);
+            }
+        })
+        .catch(() => {}); // Silently ignore if offline or first boot
 });
 
 // =============================================================================
@@ -111,6 +122,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Hardware Validations
         if (isNaN(rshunt) || rshunt <= 0) errorMsg += '- Resistor Shunt inválido\n';
 
+        // MCP4725 supply voltage validation
+        const extDacVrefEl = document.getElementById('ext-dac-vref');
+        const extDacVref = extDacVrefEl ? parseFloat(extDacVrefEl.value) : 5.0;
+        if (isNaN(extDacVref) || extDacVref < 4.0 || extDacVref > 5.5) {
+            errorMsg += `- Tensão MCP4725 fora da faixa (${extDacVref.toFixed(1)}V). Use entre 4.0V e 5.5V\n`;
+        }
+
         if (errorMsg) {
             console.warn("Validation failed:", errorMsg);
             alert('⚠️ Erro na configuração:\n' + errorMsg);
@@ -148,6 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
             settling_ms: (settlingTime === 0 || settlingTime > 0) ? settlingTime : 0,
             oversampling: oversamplingFactor,
             adc_gain: adcGain,
+            ext_dac_vref: extDacVref,
             use_external_hw: useExternalHW,
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
@@ -174,7 +193,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!hwCheck.all_ok) {
                     const missing = [];
-                    if (hwCheck.mcp4725_vds === false) missing.push('MCP4725 (DAC VDS — I²C 0x61)');
                     if (hwCheck.mcp4725_vgs === false) missing.push('MCP4725 (DAC VGS — I²C 0x60)');
                     if (hwCheck.ads1115 === false) missing.push('ADS1115 (ADC — I²C 0x48)');
 
