@@ -118,10 +118,11 @@ struct HalConfig {
     uint16_t adc_oversampling = 16;
 
     // Reference voltages and safety limits
-    float dac_vref = 3.3f;
-    float adc_vref = 3.3f;
-    float max_vds  = 3.3f;
-    float max_vgs  = 3.3f;
+    float dac_vref       = 3.3f; // ESP32 Internal DAC Ref
+    float adc_vref       = 3.3f; // ESP32 Internal ADC Ref
+    float ext_dac_vref   = 5.0f; // MCP4725 VDD Ref
+    float max_vds        = 5.0f; // Allow up to 5V (clipped internally later if needed)
+    float max_vgs        = 5.0f; // Allow up to 5V (clipped internally later if needed)
 };
 
 // ============================================================================
@@ -156,10 +157,6 @@ constexpr uint8_t  EXT_ADC_ADDR    = 0x48;    // ADDR pin → GND
 constexpr uint8_t  EXT_ADC_BITS    = 16;
 constexpr float    EXT_ADC_VREF    = 6.144f;  // Default FSR: GAIN_TWOTHIRDS (±6.144 V)
 constexpr int16_t  EXT_ADC_MAX_RAW = 32767;   // Positive full-scale
-
-// Safety voltage limits
-constexpr float MAX_VDS_VOLTAGE = 3.3f;
-constexpr float MAX_VGS_VOLTAGE = 3.3f;
 
 
 // ============================================================================
@@ -235,7 +232,7 @@ private:
 // write is deterministic and does not benefit from averaging.
 class ExternalDAC : public IVoltageSource {
 public:
-    explicit ExternalDAC(uint8_t i2cAddr, float maxVoltage = 3.3f);
+    explicit ExternalDAC(uint8_t i2cAddr, float maxVoltage = 5.0f);
     ~ExternalDAC() override = default;
 
     void    setVoltage(float voltage) override;

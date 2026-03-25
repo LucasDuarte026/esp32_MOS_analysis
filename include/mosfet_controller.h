@@ -21,6 +21,15 @@
 
 // Pin and HAL definitions live in hardware_hal.h.
 
+// ============================================================================
+// DAC Closed-Loop Calibration Parameters
+// ============================================================================
+/// Maximum allowed read-back error before triggering correction loop [V]
+#define VD_GLOBAL_ERROR    0.005f
+#define VG_GLOBAL_ERROR    0.001f
+/// Maximum correction iterations before giving up and keeping best estimate
+#define DAC_CALIB_MAX_ITER 10
+
 // ----------------------------------------------------------------------------
 // SweepMode — which axis is the inner (fast) loop
 // ----------------------------------------------------------------------------
@@ -138,6 +147,25 @@ private:
     float readAnalogVoltage();
     bool  openMeasurementFile();
     void  closeMeasurementFile();
+
+    /**
+     * @brief Closed-loop VD calibration.
+     *
+     * Sets VDS to `target`, reads back the actual voltage, and if the error
+     * exceeds VD_GLOBAL_ERROR enters a correction loop (max DAC_CALIB_MAX_ITER).
+     * In the stable case (error already within tolerance) only ONE ADC read is
+     * performed — making it fast when the rail is steady.
+     *
+     * @param target_vd  Desired drain voltage [V]
+     * @param settling   Settling delay after each DAC write [ms]
+     * @return           Best-achieved probe voltage sent to the DAC [V]
+     */
+    float calibrateVD(float target_vd, int settling_ms);
+
+    /**
+     * @brief Closed-loop VG calibration — same algorithm, gate rail.
+     */
+    float calibrateVG(float target_vg, int settling_ms);
 
     SweepConfig      config_;
     bool             measuring_  = false;

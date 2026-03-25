@@ -180,8 +180,12 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   config.use_external_hw = useExternal;
   hal::HardwareMode targetMode = useExternal ? hal::HardwareMode::HW_EXTERNAL : hal::HardwareMode::HW_INTERNAL;
   hal::HalConfig halCfg;
-  halCfg.hardware_mode   = targetMode;
+  halCfg.hardware_mode    = targetMode;
   halCfg.adc_oversampling = oversampling;
+  halCfg.ext_dac_vref     = extDacVref;
+  halCfg.max_vgs          = useExternal ? extDacVref : 3.3f;
+  halCfg.max_vds          = 3.3f; // InternalDAC is always 3.3f
+  
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
 
   // Apply VDD reference to ExternalDAC VGS

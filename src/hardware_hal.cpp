@@ -231,7 +231,6 @@ float ExternalADC::readVoltage() {
 
 float ExternalADC::readVoltage(uint8_t channel) {
     if (channel == 0) return readVoltage(0, currentGainCode_);
-    // VD (A1) and VG (A2) must use high range (+/- 6.144V) to avoid saturation
     return readVoltage(channel, 0); 
 }
 
@@ -253,8 +252,6 @@ float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     
     if (gainOverride != currentGainCode_) {
         ads_.setGain(g);
-        // Small delay for electric stabilization after mux/gain switch
-        delayMicroseconds(500); 
     }
 
     // ── Sample collection ──────────────────────────────────────────────────
@@ -389,16 +386,16 @@ void HardwareHAL::initInternal(const HalConfig& config) {
     LOG_WARN("--- HARDWARE DEVICE SELECTION (INTERNAL MODE) ---");
     LOG_WARN("PROVISIONAL OVERRIDE: Forcing InternalDAC for VDS (Drain).");
     // VDS DAC — InternalDAC channel 1 (GPIO25)
-    auto vds = std::make_unique<InternalDAC>(1, config.max_vds);
+    auto vds = std::unique_ptr<InternalDAC>(new InternalDAC(1, config.max_vds));
     vds->begin();
     dacVDS_ = std::move(vds);
 
     LOG_WARN("PROVISIONAL OVERRIDE: Forcing ExternalDAC (MCP4725) for VGS (Gate) even in INTERNAL mode.");
     // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
-    auto vgs = std::make_unique<ExternalDAC>(EXT_DAC_VGS_ADDR, config.max_vgs);
+    auto vgs = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VGS_ADDR, config.max_vgs));
     if (!vgs->begin()) {
         LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
-        auto vgs_fallback = std::make_unique<InternalDAC>(2, config.max_vgs);
+        auto vgs_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
         vgs_fallback->begin();
         dacVGS_ = std::move(vgs_fallback);
     } else {
@@ -407,7 +404,7 @@ void HardwareHAL::initInternal(const HalConfig& config) {
 
     LOG_INFO("Using InternalADC for Shunt (Current limits).");
     // Shunt ADC — InternalADC (GPIO34)
-    auto adc = std::make_unique<InternalADC>(config.adc_shunt_pin, config.adc_oversampling);
+    auto adc = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
     adc->begin();
     adcShunt_ = std::move(adc);
 
@@ -423,16 +420,16 @@ void HardwareHAL::initExternal(const HalConfig& config) {
     LOG_WARN("--- HARDWARE DEVICE SELECTION (EXTERNAL MODE) ---");
     LOG_WARN("PROVISIONAL OVERRIDE: Forcing InternalDAC for VDS (Drain) instead of External MCP4725.");
     // VDS DAC — InternalDAC channel 1 (GPIO25) for VDS in EXTERNAL mode due to missing MCP4725
-    auto vds = std::make_unique<InternalDAC>(1, config.max_vds);
+    auto vds = std::unique_ptr<InternalDAC>(new InternalDAC(1, config.max_vds));
     vds->begin();
     dacVDS_ = std::move(vds);
 
     LOG_WARN("Using ExternalDAC (MCP4725) for VGS (Gate) as requested by external mode.");
     // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
-    auto vgs = std::make_unique<ExternalDAC>(EXT_DAC_VGS_ADDR, config.max_vgs);
+    auto vgs = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VGS_ADDR, config.max_vgs));
     if (!vgs->begin()) {
         LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
-        auto vgs_fallback = std::make_unique<InternalDAC>(2, config.max_vgs);
+        auto vgs_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
         vgs_fallback->begin();
         dacVGS_ = std::move(vgs_fallback);
     } else {
@@ -441,10 +438,10 @@ void HardwareHAL::initExternal(const HalConfig& config) {
 
     LOG_INFO("Using ExternalADC (ADS1115) for Shunt.");
     // Shunt ADC — ExternalADC ADS1115 (I2C 0x48, channel A0)
-    auto adc = std::make_unique<ExternalADC>(EXT_ADC_ADDR, config.adc_oversampling);
+    auto adc = std::unique_ptr<ExternalADC>(new ExternalADC(EXT_ADC_ADDR, config.adc_oversampling));
     if (!adc->begin()) {
         LOG_ERROR("ExternalADC (ADS1115) init failed — falling back to InternalADC");
-        auto adc_fallback = std::make_unique<InternalADC>(config.adc_shunt_pin, config.adc_oversampling);
+        auto adc_fallback = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
         adc_fallback->begin();
         adcShunt_ = std::move(adc_fallback);
     } else {

@@ -18,7 +18,7 @@ namespace monitoring
     namespace
     {
         // Shared data protected by mutex
-        SystemStatus g_status = {0};
+        SystemStatus g_status;
         SemaphoreHandle_t g_mutex = nullptr;
 
         // Update interval
