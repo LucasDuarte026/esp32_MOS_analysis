@@ -83,30 +83,35 @@ void logToSerialAsync(const char* msg);
 #define WEB_LOG_DEBUG(fmt, ...) do { \
     char rawBuf[512]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
-    logToSerialAsync(("[DEBUG] " + String(rawBuf)).c_str()); \
+    String _dbgMsg = String("[DEBUG] ") + rawBuf; \
+    logToSerialAsync(_dbgMsg.c_str()); \
     g_log_buffer.addLog(LOG_LEVEL_DEBUG, rawBuf); \
 } while(0)
 
 #define WEB_LOG_INFO(fmt, ...) do { \
     char rawBuf[512]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
-    logToSerialAsync(("[INFO] " + String(rawBuf)).c_str()); \
+    String _infoMsg = String("[INFO] ") + rawBuf; \
+    logToSerialAsync(_infoMsg.c_str()); \
     g_log_buffer.addLog(LOG_LEVEL_INFO, rawBuf); \
 } while(0)
 
 #define WEB_LOG_WARN(fmt, ...) do { \
     char rawBuf[512]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
-    logToSerialAsync(("[WARN] " + String(rawBuf)).c_str()); \
+    String _warnMsg = String("[WARN] ") + rawBuf; \
+    logToSerialAsync(_warnMsg.c_str()); \
     g_log_buffer.addLog(LOG_LEVEL_WARN, rawBuf); \
 } while(0)
 
 #define WEB_LOG_ERROR(fmt, ...) do { \
     char rawBuf[512]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
-    logToSerialAsync(("[ERROR] " + String(rawBuf)).c_str()); \
+    String _errMsg = String("[ERROR] ") + rawBuf; \
+    logToSerialAsync(_errMsg.c_str()); \
     g_log_buffer.addLog(LOG_LEVEL_ERROR, rawBuf); \
 } while(0)
+
 
 // ============================================================================
 // Public LOG_* macros — use these throughout the codebase

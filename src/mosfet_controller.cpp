@@ -308,9 +308,10 @@ float MOSFETController::calibrateVD(float target_vd, int settling_ms)
     }
 
     // Give up — emit WARN, keep best estimate
+    float vsh = hal::readShuntVoltage();
     LOG_WARN("[CALIB VD] FAILED to meet tolerance after %d iters "
-             "| target=%.3fV probe_sent=%.3fV vd_read=%.3fV err=%.4fV (threshold=%.3fV)",
-             DAC_CALIB_MAX_ITER, target_vd, probe, read_back, error, VD_GLOBAL_ERROR);
+             "| target=%.3fV probe_sent=%.3fV vd_read=%.3fV err=%.4fV (threshold=%.3fV) vsh=%.3fV",
+             DAC_CALIB_MAX_ITER, target_vd, probe, read_back, error, VD_GLOBAL_ERROR, vsh);
     return probe;
 }
 
@@ -345,9 +346,10 @@ float MOSFETController::calibrateVG(float target_vg, int settling_ms)
         }
     }
 
+    float vsh = hal::readShuntVoltage();
     LOG_WARN("[CALIB VG] FAILED to meet tolerance after %d iters "
-             "| target=%.3fV probe_sent=%.3fV vg_read=%.3fV err=%.4fV (threshold=%.3fV)",
-             DAC_CALIB_MAX_ITER, target_vg, probe, read_back, error, VG_GLOBAL_ERROR);
+             "| target=%.3fV probe_sent=%.3fV vg_read=%.3fV err=%.4fV (threshold=%.3fV) vsh=%.3fV",
+             DAC_CALIB_MAX_ITER, target_vg, probe, read_back, error, VG_GLOBAL_ERROR, vsh);
     return probe;
 }
 
@@ -458,8 +460,8 @@ void MOSFETController::performSweep()
         hal::setADC_Gain(config_.adc_gain);
     }
 
-    // Column Headers - Restoring original positions, renaming back to vd, vg as requested
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vsh,ids,vd_read,vg_read\n");
+    // Column Headers — new canonical order
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
@@ -509,9 +511,13 @@ void MOSFETController::performSweep()
                 float ids       = vsh / rshunt;
                 float vd_actual = hal::readVD_Actual();
                 float vg_actual = hal::readVG_Actual();
+                float vds_true  = vd_actual - vsh;
+                float vgs_true  = vg_actual - vsh;
 
-                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e,%.3f,%.3f\n",
-                           (unsigned long)millis(), vds, vgs, vsh, ids, vd_actual, vg_actual);
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
+                           (unsigned long)millis(), vds, vgs,
+                           vd_actual, vg_actual, vsh,
+                           vds_true, vgs_true, ids);
 
                 rowCount++;
                 current_point++;
@@ -571,6 +577,8 @@ void MOSFETController::performSweep()
                 float ids       = vsh / rshunt;
                 float vd_actual = hal::readVD_Actual();
                 float vg_actual = hal::readVG_Actual();
+                float vds_true_val = vd_actual - vsh;
+                float vgs_true_val = vg_actual - vsh;
 
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
@@ -578,10 +586,14 @@ void MOSFETController::performSweep()
                 currentCurve.vsh.push_back(vsh);
                 currentCurve.vd_read.push_back(vd_actual);
                 currentCurve.vg_read.push_back(vg_actual);
+                currentCurve.vds_true.push_back(vds_true_val);
+                currentCurve.vgs_true.push_back(vgs_true_val);
                 currentCurve.timestamps.push_back(millis());
 
-                currentFile_.printf("%lu,%.3f,%.3f,%.6f,%.6e,%.3f,%.3f\n",
-                           (unsigned long)millis(), vds, vgs, vsh, ids, vd_actual, vg_actual);
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
+                           (unsigned long)millis(), vds, vgs,
+                           vd_actual, vg_actual, vsh,
+                           vds_true_val, vgs_true_val, ids);
 
                 rowCount++;
                 current_point++;
@@ -634,25 +646,28 @@ void MOSFETController::performSweep()
 }
 
 void MOSFETController::calculateCurveParams(CurveData& curve) {
-    if(curve.ids.empty() || curve.vgs.empty()) return;
-    
-    // 1. Calculate Gm using MathEngine (smooth derivative)
+    if(curve.ids.empty() || curve.vgs_true.empty()) return;
+
+    // All calculations use the true terminal voltage vgs_true = vg_read - vsh
+    // so that Gm, Vt, and SS reflect the actual MOSFET bias, not the commanded target.
+
+    // 1. Calculate Gm using MathEngine (smooth derivative) — x-axis: vgs_true
     math_engine::GmConfig gmConfig;
     gmConfig.smoothingWindow = 5;
     gmConfig.useSavitzkyGolay = true;
-    
-    curve.gm = math_engine::calculateGm(curve.ids, curve.vgs, gmConfig);
-    
-    // 2. Calculate Vt using MathEngine (Peak Gm + Extrapolation)
-    curve.vt = math_engine::calculateVt(curve.gm, curve.vgs, curve.ids);
-    
+
+    curve.gm = math_engine::calculateGm(curve.ids, curve.vgs_true, gmConfig);
+
+    // 2. Calculate Vt using MathEngine (Peak Gm + Extrapolation) — x-axis: vgs_true
+    curve.vt = math_engine::calculateVt(curve.gm, curve.vgs_true, curve.ids);
+
     // 3. Find Max Gm
     auto max_gm_it = std::max_element(curve.gm.begin(), curve.gm.end());
     curve.max_gm = (max_gm_it != curve.gm.end()) ? *max_gm_it : 0.0f;
-    
-    // 4. Calculate SS and Tangent Line using MathEngine
-    math_engine::SSResult ssResult = math_engine::calculateSS(curve.ids, curve.vgs);
-    
+
+    // 4. Calculate SS and Tangent Line — x-axis: vgs_true
+    math_engine::SSResult ssResult = math_engine::calculateSS(curve.ids, curve.vgs_true);
+
     if (ssResult.valid) {
         curve.ss = ssResult.ss_mVdec;
         curve.ss_x1 = ssResult.x1;
@@ -745,8 +760,8 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     len = snprintf(lineBuf, sizeof(lineBuf), "#\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
-    // Column Headers - Old names vd, vg and original positions, extra reads at the right
-    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vd,vg,vsh,ids,gm,vd_read,vg_read\n");
+    // Column Headers — canonical order matching streaming path
+    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     LOG_INFO("Header written: %u bytes", (unsigned)totalWritten);
@@ -756,15 +771,16 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     // Write Data - use snprintf for reliable formatting
     for(const auto& res : results) {
         for(size_t i=0; i<res.vgs.size(); i++) {
-            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.4f,%.6e,%.6e,%.3f,%.3f\n",
+            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
                 (unsigned long)res.timestamps[i],
                 res.vds,
                 res.vgs[i],
-                res.vsh[i],
-                res.ids[i],
-                res.gm[i],
                 res.vd_read[i],
-                res.vg_read[i]
+                res.vg_read[i],
+                res.vsh[i],
+                res.vds_true[i],
+                res.vgs_true[i],
+                res.ids[i]
             );
             
             size_t written = file.write((uint8_t*)lineBuf, len);

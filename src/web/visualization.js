@@ -243,7 +243,9 @@ function parseCSV(csvText) {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        if (line.includes('timestamp,vds') || line.includes('time,vds')) {
+        // Detect data header row — support both legacy and new format
+        if (line.includes('timestamp,vds') || line.includes('time,vds') ||
+            line.includes('timestamp,vd,') || line.includes('time,vd,')) {
             dataStartIndex = i + 1;
         }
 
@@ -303,37 +305,71 @@ function parseCSV(csvText) {
     const vgsSet = new Set();
 
     // 2. Data Parsing
+    // New format (v7.1.0+): timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids  (9 cols)
+    // Legacy format:        timestamp,vds,vgs,vsh,ids,...                                (7 cols)
     for (let i = dataStartIndex; i < lines.length; i++) {
-        const parts = lines[i].split(',');
+        const line = lines[i].trim();
+        if (!line || line.startsWith('#')) continue;
+        const parts = line.split(',');
         if (parts.length < 5) continue;
 
-        const vds = parseFloat(parts[1]);
-        const vgs = parseFloat(parts[2]);
-        const vsh = parseFloat(parts[3]);
-        const ids = parseFloat(parts[4]);
-        const gm = parseFloat(parts[5]);
+        let vds, vgs, vsh, ids, gm, vd_read, vg_read, vds_true, vgs_true;
 
-        // Legacy format fallback
-        let vt = (parts.length > 6) ? parseFloat(parts[6]) : 0;
-        let ss = (parts.length > 7) ? parseFloat(parts[7]) : 0;
+        if (parts.length >= 9) {
+            // New format: timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids
+            vds = parseFloat(parts[1]);  // commanded vd target
+            vgs = parseFloat(parts[2]);  // commanded vg target
+            vd_read = parseFloat(parts[3]);
+            vg_read = parseFloat(parts[4]);
+            vsh = parseFloat(parts[5]);
+            vds_true = parseFloat(parts[6]);
+            vgs_true = parseFloat(parts[7]);
+            ids = parseFloat(parts[8]);
+            gm = 0; // recalculated in calculateGmForData
+        } else {
+            // Legacy format: timestamp,vds,vgs,vsh,ids[,gm,...]
+            vds = parseFloat(parts[1]);
+            vgs = parseFloat(parts[2]);
+            vsh = parseFloat(parts[3]);
+            ids = parseFloat(parts[4]);
+            gm = (parts.length > 5) ? parseFloat(parts[5]) : 0;
+            vd_read = (parts.length > 6) ? parseFloat(parts[6]) : vds;
+            vg_read = (parts.length > 7) ? parseFloat(parts[7]) : vgs;
+            // No true voltages in legacy — fall back to commanded values
+            vds_true = vds;
+            vgs_true = vgs;
+        }
 
-        if (!isNaN(vds) && !isNaN(vgs)) {
+        // Legacy format fallback for Vt/SS (no longer stored per-row in new format)
+        let vt = 0;
+        let ss = 0;
+
+        if (!isNaN(vds_true) && !isNaN(vgs_true)) {
+            const vdsTrueRounded = Math.round(vds_true * 1000) / 1000;
+            const vgsTrueRounded = Math.round(vgs_true * 1000) / 1000;
             const vdsRounded = Math.round(vds * 1000) / 1000;
             const vgsRounded = Math.round(vgs * 1000) / 1000;
+
+            // Curve selector is built from COMMANDED values (the loop targets the user set)
             vdsSet.add(vdsRounded);
             vgsSet.add(vgsRounded);
 
+            // Look up backend-computed metadata by the commanded VDS key
             if (analysisMap[vdsRounded]) {
                 vt = analysisMap[vdsRounded].vt;
                 ss = analysisMap[vdsRounded].ss;
             }
 
             currentCSVData.push({
-                vds: vdsRounded,
-                vgs: vgsRounded,
-                vsh: vsh,
+                vds: vdsRounded,       // commanded target
+                vgs: vgsRounded,       // commanded target
+                vsh: isNaN(vsh) ? 0 : vsh,
                 ids: isNaN(ids) ? 0 : ids,
                 gm: isNaN(gm) ? 0 : gm,
+                vd_read: isNaN(vd_read) ? vds : vd_read,
+                vg_read: isNaN(vg_read) ? vgs : vg_read,
+                vds_true: vdsTrueRounded,  // true terminal VDS (for plot x-axis)
+                vgs_true: vgsTrueRounded,  // true terminal VGS (for plot x-axis)
                 vt: vt,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
@@ -341,8 +377,9 @@ function parseCSV(csvText) {
         }
     }
 
-    // In VDS sweep mode (IdVd): the curve selector lists unique VGS values (one curve per VGS).
-    // In VGS sweep mode (IdVg): the curve selector lists unique VDS values (one curve per VDS).
+    // Curve selector lists unique COMMANDED voltage values (the loop targets):
+    //   VDS sweep → unique vgs values (one curve per fixed commanded VGS)
+    //   VGS sweep → unique vds values (one curve per fixed commanded VDS)
     if (currentSweepMode === 'VDS') {
         uniqueVDSValues = Array.from(vgsSet).sort((a, b) => a - b);
     } else {
@@ -413,19 +450,23 @@ function calculateGmForData(data, sweepMode) {
     if (!data || data.length < 2) return;
     const curves = {};
     data.forEach(d => {
-        const key = sweepMode === 'VDS' ? d.vgs : d.vds;
+        // Group by the FIXED axis true-voltage
+        const key = sweepMode === 'VDS' ? d.vgs_true : d.vds_true;
         if (!curves[key]) curves[key] = [];
         curves[key].push(d);
     });
 
     Object.keys(curves).forEach(k => {
         const curve = curves[k];
-        curve.sort((a, b) => (sweepMode === 'VDS' ? a.vds - b.vds : a.vgs - b.vgs));
+        curve.sort((a, b) => (sweepMode === 'VDS' ? a.vds_true - b.vds_true : a.vgs_true - b.vgs_true));
 
         for (let i = 1; i < curve.length - 1; i++) {
             const prev = curve[i - 1];
             const next = curve[i + 1];
-            const dx = sweepMode === 'VDS' ? (next.vds - prev.vds) : (next.vgs - prev.vgs);
+            // Use true voltages for dx
+            const dx = sweepMode === 'VDS'
+                ? (next.vds_true - prev.vds_true)
+                : (next.vgs_true - prev.vgs_true);
             const dy = next.ids - prev.ids;
 
             if (Math.abs(dx) > 1e-6) curve[i].gm = dy / dx;
@@ -490,21 +531,22 @@ function updatePlotsMultiCurve() {
     };
 
     // ── Filter Data ─────────────────────────────────────────────────────────
-    // curveVal is the FIXED axis value used to select one curve:
-    //   VDS mode → curveVal is a VGS value (fixed gate); X axis = VDS
-    //   VGS mode → curveVal is a VDS value (fixed drain); X axis = VGS
+    // curveVal comes from the drop-down which lists COMMANDED voltages.
+    // We filter by the commanded target so the user sees exactly the curves
+    // they configured (e.g. 3.0, 3.1, 3.2, 3.3 V).
+    // X-axis and calculations still use vds_true / vgs_true.
     const curveVal = parseFloat(vdsSelect.value);
     if (isNaN(curveVal)) return;
 
     let plotData;
     if (isVDSMode) {
-        // IdVd: show Ids vs VDS for the selected VGS
+        // IdVd: fixed commanded VGS; X axis = VDS_true
         plotData = currentCSVData.filter(d => Math.abs(d.vgs - curveVal) < 0.0015);
-        plotData.sort((a, b) => a.vds - b.vds);
+        plotData.sort((a, b) => a.vds_true - b.vds_true);
     } else {
-        // IdVg: show Ids vs VGS for the selected VDS
+        // IdVg: fixed commanded VDS; X axis = VGS_true
         plotData = currentCSVData.filter(d => Math.abs(d.vds - curveVal) < 0.0015);
-        plotData.sort((a, b) => a.vgs - b.vgs);
+        plotData.sort((a, b) => a.vgs_true - b.vgs_true);
     }
 
     if (plotData.length === 0) {
@@ -512,7 +554,7 @@ function updatePlotsMultiCurve() {
         return;
     }
 
-    const xData = plotData.map(d => isVDSMode ? d.vds : d.vgs);
+    const xData = plotData.map(d => isVDSMode ? d.vds_true : d.vgs_true);
 
     // ── Traces ──────────────────────────────────────────────────────────────
     // 1. Ids trace (always present)
@@ -575,10 +617,10 @@ function updatePlotsMultiCurve() {
 
     // ── Layout ───────────────────────────────────────────────────────────────
     const plotTitle = isVDSMode
-        ? `Curva de Saída — VGS = ${curveVal.toFixed(3)} V`
-        : `Curva de Transferência — VDS = ${curveVal.toFixed(3)} V`;
+        ? `Curva de Saída — VGS_true = ${curveVal.toFixed(3)} V`
+        : `Curva de Transferência — VDS_true = ${curveVal.toFixed(3)} V`;
 
-    const xAxisTitle = isVDSMode ? 'VDS (V)' : 'VGS (V)';
+    const xAxisTitle = isVDSMode ? 'VDS_true (V)' : 'VGS_true (V)';
 
     const layout = {
         title: plotTitle,

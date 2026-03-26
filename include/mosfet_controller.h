@@ -74,8 +74,12 @@ struct DataPoint {
     float ss;   ///< Subthreshold swing (mV/decade)
 
     // True readings from multichannel ADC
-    float vd_read; ///< Actual VDS measured (V)
-    float vg_read; ///< Actual VGS measured (V)
+    float vd_read;   ///< Actual drain node voltage measured (V)
+    float vg_read;   ///< Actual gate node voltage measured (V)
+
+    // True transistor terminal voltages (accounting for shunt drop)
+    float vds_true;  ///< True VDS = vd_read - vsh_measured (V)
+    float vgs_true;  ///< True VGS = vg_read - vsh_measured (V)
 };
 
 // ============================================================================
@@ -182,12 +186,14 @@ private:
         float max_gm;   ///< Peak transconductance (S)
         float rshunt;   ///< Rshunt passed in for downstream validity checks
 
-        std::vector<float>    vgs;
+        std::vector<float>    vgs;       ///< Commanded VGS target
         std::vector<float>    ids;
         std::vector<float>    gm;
         std::vector<float>    vsh;
         std::vector<float>    vd_read;
         std::vector<float>    vg_read;
+        std::vector<float>    vds_true;  ///< True VDS = vd_read - vsh
+        std::vector<float>    vgs_true;  ///< True VGS = vg_read - vsh
         std::vector<uint32_t> timestamps;
 
         // Tangent line endpoints in (VGS, log10(Ids)) space for dashboard overlay

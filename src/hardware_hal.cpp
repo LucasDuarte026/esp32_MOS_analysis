@@ -237,6 +237,9 @@ float ExternalADC::readVoltage(uint8_t channel) {
 float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     if (!initialized_) { LOG_ERROR("ExternalADC 0x%02X not initialized!", i2cAddr_); return 0.0f; }
 
+    static uint8_t lastChannel = 255;
+    bool configChanged = false;
+
     // ── Apply temporary gain ───────────────────────────────────────────────
     adsGain_t g;
     float fsr;
@@ -252,6 +255,19 @@ float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     
     if (gainOverride != currentGainCode_) {
         ads_.setGain(g);
+        configChanged = true;
+    }
+
+    if (channel != lastChannel) {
+        configChanged = true;
+        lastChannel = channel;
+    }
+
+    // Se o multiplexador mudou a porta ou o ganho, o ADC precisa jogar 1 leitura fora
+    if (configChanged) {
+        // Discard 1st conversion (wait at least 1-2 ms for electrical settling internally)
+        delay(2);
+        ads_.readADC_SingleEnded(channel);
     }
 
     // ── Sample collection ──────────────────────────────────────────────────
