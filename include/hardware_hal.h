@@ -67,6 +67,8 @@ public:
     virtual uint8_t getBits() const = 0;
     /** Set output to 0 V (safety shutdown). */
     virtual void    shutdown() = 0;
+    /** Hardware name (e.g., "MCP4725 0x60"). */
+    virtual const char* getName() const = 0;
 };
 
 /**
@@ -83,7 +85,13 @@ public:
     virtual float    readVoltage() = 0;
     
     /** Read voltage from a specific channel (oversampled). */
-    virtual float    readVoltage(uint8_t channel) = 0;
+    virtual float    readVoltage(uint8_t channel, uint8_t gainOverride = 255) = 0;
+    
+    /** Read voltage (fast 1-3 samples max, no heavy filtering). */
+    virtual float    readVoltageFast() = 0;
+    
+    /** Read voltage from a specific channel (fast 1-3 samples max, no heavy filtering). */
+    virtual float    readVoltageFast(uint8_t channel, uint8_t gainOverride = 255) = 0;
     
     /** Read single raw ADC value from default channel (no averaging). */
     virtual uint16_t readRaw() = 0;
@@ -101,6 +109,12 @@ public:
     
     /** Configure PGA gain if supported (blank default). */
     virtual void     setGain(uint8_t gainCode, bool silent = false) {}
+    
+    /** Retrieve the real gain dynamically picked by Auto-Ranging for a specific channel. */
+    virtual uint8_t  getLastUsedGain(uint8_t channel) const { return 0; }
+    
+    /** Hardware name (e.g., "ADS1115 0x48"). */
+    virtual const char* getName() const = 0;
 };
 
 // ============================================================================
@@ -143,8 +157,9 @@ constexpr uint16_t ADC_MAX_VALUE       = 4095;
 constexpr float    ADC_VREF            = 3.3f;
 constexpr uint16_t ADC_DEFAULT_SAMPLES = 64;
 
-// External DAC (MCP4725 — 12-bit, 0–3.3 V)
+// External DAC (MCP4725 — 12-bit, 0–5.0 V typical)
 constexpr uint8_t  EXT_DAC_VGS_ADDR  = 0x60;  // ADDR pin → GND
+constexpr uint8_t  EXT_DAC_VDS_ADDR  = 0x61;  // ADDR pin → VCC
 constexpr uint8_t  EXT_DAC_BITS      = 12;
 constexpr uint16_t EXT_DAC_MAX_VALUE = 4095;
 constexpr float    EXT_DAC_VREF      = 5.0f; // Updated to 5.0V based on hardware readings
@@ -175,6 +190,7 @@ public:
     float   getResolution() const override { return DAC_VREF / (DAC_MAX_VALUE + 1); }
     uint8_t getBits() const override       { return DAC_RESOLUTION; }
     void    shutdown() override;
+    const char* getName() const override { return "ESP32 DAC (8-bit)"; }
 
     void    begin();
     uint8_t getCurrentValue() const { return currentValue_; }
@@ -205,13 +221,17 @@ public:
     ~InternalADC() override = default;
 
     float    readVoltage() override;
-    float    readVoltage(uint8_t channel) override;
+    float    readVoltage(uint8_t channel, uint8_t gainOverride = 255) override;
+    
+    float    readVoltageFast() override;
+    float    readVoltageFast(uint8_t channel, uint8_t gainOverride = 255) override;
     uint16_t readRaw() override;
     uint16_t readRaw(uint8_t channel) override;
     float    getResolution() const override         { return ADC_VREF / (ADC_MAX_VALUE + 1); }
     uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
     void     setOversamplingCount(uint16_t count) override;
     float    getEffectiveBits() const override;
+    const char* getName() const override { return "ESP32 ADC (12-bit)"; }
 
     void begin();
 
@@ -240,6 +260,7 @@ public:
     float   getResolution() const override { return extDacVref_ / (EXT_DAC_MAX_VALUE + 1); }
     uint8_t getBits() const override       { return EXT_DAC_BITS; }
     void    shutdown() override;
+    const char* getName() const override { return name_; }
 
     /** Initialize the MCP4725. Returns true on success. */
     bool begin();
@@ -254,6 +275,7 @@ private:
     float            extDacVref_  = EXT_DAC_VREF; // runtime VDD, updated via setExtDacVref()
     uint16_t         currentValue_ = 0;
     bool             initialized_  = false;
+    char             name_[20];
     Adafruit_MCP4725 mcp_;
 };
 
@@ -274,14 +296,18 @@ public:
     ~ExternalADC() override = default;
 
     float    readVoltage() override;
-    float    readVoltage(uint8_t channel) override;
-    float    readVoltage(uint8_t channel, uint8_t gainOverride); // New overload
+    float    readVoltage(uint8_t channel, uint8_t gainOverride = 255) override; 
+    
+    float    readVoltageFast() override;
+    float    readVoltageFast(uint8_t channel, uint8_t gainOverride = 255) override;
     uint16_t readRaw() override;
     uint16_t readRaw(uint8_t channel) override;
     float    getResolution() const override         { return EXT_ADC_VREF / (EXT_ADC_MAX_RAW + 1); }
     uint16_t getOversamplingCount() const override  { return oversamplingCount_; }
     void     setOversamplingCount(uint16_t count) override;
     float    getEffectiveBits() const override;
+    uint8_t  getLastUsedGain(uint8_t channel) const override { if (channel < 4) return lastAutoGain_[channel]; return 0; }
+    const char* getName() const override { return name_; }
 
     /** Initialize the ADS1115. Returns true on success. */
     bool begin();
@@ -301,6 +327,8 @@ private:
     bool             initialized_ = false;
     float            fsr_         = EXT_ADC_VREF;  // current FSR, updated by setGain()
     uint8_t          currentGainCode_ = 0;         // default to GAIN_TWOTHIRDS (0)
+    uint8_t          lastAutoGain_[4] = {0, 0, 0, 0}; // memoized gain for Auto-Range mode
+    char             name_[20];
     Adafruit_ADS1115 ads_;
 };
 
@@ -350,12 +378,20 @@ public:
     ExternalDAC*     getExternalVGS();  // returns nullptr if not ExternalDAC
     
     /** Specialized reading methods assuming external ADC mapped to A0/A1/A2 */
-    float readShuntVoltage(); 
-    float readVD_Actual();
-    float readVG_Actual();
+    float readShuntVoltage(uint8_t gainCode = 255); 
+    float readVD_Actual(uint8_t gainCode = 255);
+    float readVG_Actual(uint8_t gainCode = 255);
+    
+    /** Fast specialized reading methods for iterative calibration */
+    float readShuntVoltageFast(uint8_t gainCode = 255); 
+    float readVD_ActualFast(uint8_t gainCode = 255);
+    float readVG_ActualFast(uint8_t gainCode = 255);
 
     /** Configure ADS1115 PGA gain (0..16) */
     void setADC_Gain(uint8_t gainCode);
+    
+    /** Returns a string summary of the currently active hardware (e.g., "Fully External (VDS: MCP4725...)") */
+    String getHardwareSummary() const;
 
     void shutdown();
     bool isInitialized() const { return initialized_; }
@@ -383,9 +419,12 @@ private:
 void  init();
 void  setVDS(float voltage);
 void  setVGS(float voltage);
-float readShuntVoltage();
-float readVD_Actual();
-float readVG_Actual();
+float readShuntVoltage(uint8_t gainCode = 255);
+float readVD_Actual(uint8_t gainCode = 255);
+float readVG_Actual(uint8_t gainCode = 255);
+float readShuntVoltageFast(uint8_t gainCode = 255);
+float readVD_ActualFast(uint8_t gainCode = 255);
+float readVG_ActualFast(uint8_t gainCode = 255);
 void  setADC_Gain(uint8_t gainCode);
 void  shutdown();
 

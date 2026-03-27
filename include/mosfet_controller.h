@@ -24,9 +24,10 @@
 // ============================================================================
 // DAC Closed-Loop Calibration Parameters
 // ============================================================================
-/// Maximum allowed read-back error before triggering correction loop [V]
-#define VD_GLOBAL_ERROR    0.005f
-#define VG_GLOBAL_ERROR    0.001f
+/// Maximum allowed VDS read-back error (|VD_read - VSH - target_vds|) before
+/// entering the correction loop [V].
+#define VDS_GLOBAL_ERROR   0.020f
+#define VGS_GLOBAL_ERROR   0.010f
 /// Maximum correction iterations before giving up and keeping best estimate
 #define DAC_CALIB_MAX_ITER 10
 
@@ -51,7 +52,9 @@ struct SweepConfig {
     float rshunt;               ///< Shunt resistor (Ω); Ids = Vsh / Rshunt
     int   settling_ms;          ///< Wait after setting a new voltage before sampling (ms)
     uint16_t oversampling = 16; ///< ADC samples averaged per point (1 = off, 16 = default)
-    uint8_t  adc_gain     = 2;  ///< ADS1115 PGA gain selector: 0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V
+    uint8_t  adc_gain_vsh = 2;  ///< ADS1115 PGA gain for Shunt (A0): 0(±6.144V), 1(±4.096V), 2(±2.048V), 4(±1.024V), 8(±0.512V), 16(±0.256V)
+    uint8_t  adc_gain_vd  = 0;  ///< ADS1115 PGA gain for VD (A1): Usually 0 for ±6.144V
+    uint8_t  adc_gain_vg  = 0;  ///< ADS1115 PGA gain for VG (A2): Usually 0 for ±6.144V
     float    ext_dac_vref = 5.0f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
@@ -153,23 +156,27 @@ private:
     void  closeMeasurementFile();
 
     /**
-     * @brief Closed-loop VD calibration.
+     * @brief Closed-loop VDS calibration.
      *
-     * Sets VDS to `target`, reads back the actual voltage, and if the error
-     * exceeds VD_GLOBAL_ERROR enters a correction loop (max DAC_CALIB_MAX_ITER).
-     * In the stable case (error already within tolerance) only ONE ADC read is
-     * performed — making it fast when the rail is steady.
+     * Sets VDS DAC to a probe voltage, then reads VD_read and VSH to compute
+     * the actual differential VDS = VD_read - VSH.  If |error| > VDS_GLOBAL_ERROR
+     * the probe is nudged and the loop repeats (max DAC_CALIB_MAX_ITER).
+     * VSH is re-read at every iteration so the correction accounts for
+     * the current-dependent shunt drop.
      *
-     * @param target_vd  Desired drain voltage [V]
-     * @param settling   Settling delay after each DAC write [ms]
-     * @return           Best-achieved probe voltage sent to the DAC [V]
+     * @param target_vds  Desired drain-source voltage [V]
+     * @param settling_ms Settling delay after each DAC write [ms]
+     * @return            Best-achieved DAC probe voltage [V]
      */
-    float calibrateVD(float target_vd, int settling_ms);
+    float calibrateVDS(float target_vds, int settling_ms);
 
     /**
-     * @brief Closed-loop VG calibration — same algorithm, gate rail.
+     * @brief Closed-loop VGS calibration — same algorithm for the gate rail.
+     *
+     * Computes actual VGS = VG_read - VSH and corrects until
+     * |error| <= VGS_GLOBAL_ERROR.
      */
-    float calibrateVG(float target_vg, int settling_ms);
+    float calibrateVGS(float target_vgs, int settling_ms);
 
     SweepConfig      config_;
     bool             measuring_  = false;

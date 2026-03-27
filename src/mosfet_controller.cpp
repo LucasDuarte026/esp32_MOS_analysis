@@ -143,9 +143,9 @@ bool MOSFETController::startMeasurementAsync(const SweepConfig& config)
     }
     
     LOG_INFO("Starting measurement SWEEP (Async)");
-    LOG_INFO("  VDS: %.2fV-%.2fV | VGS: %.2fV-%.2fV", 
+    LOG_INFO("  VDS: %.2fV-%.2fV | VGS: %.2fV-%.2fV | Rshunt: %.2fΩ", 
              config.vds_start, config.vds_end, 
-             config.vgs_start, config.vgs_end);
+             config.vgs_start, config.vgs_end, config_.rshunt);
     
     // Set LED to measuring pattern
     led_status::setState(led_status::State::MEASURING);
@@ -263,72 +263,92 @@ float MOSFETController::readAnalogVoltage()
 // Closed-loop DAC calibration helpers
 // ============================================================================
 //
-// Strategy ("smart-fast"):
-//   1. Set the DAC to the raw target and wait for the rail to settle.
-//   2. Do ONE fast ADC read-back.  If |error| <= threshold → done (cheap path).
-//   3. Only if the error exceeds the threshold enter the iterative correction
-//      loop (max DAC_CALIB_MAX_ITER iterations), nudging the probe by the
-//      measured error each time.
-//   4. If the loop exhausts without meeting the target, emit a WARN and
-//      continue with the best estimate so the sweep is not blocked.
+// Strategy ("VDS/VGS differential"):
+//   The error is computed on the ACTUAL differential transistor voltage:
+//     VDS_meas = VD_read - VSH
+//     VGS_meas = VG_read - VSH
+//   VSH is re-read on every iteration so the correction automatically
+//   compensates for the current-dependent shunt drop.
 //
-// This means the "stable rail" cost is exactly ONE settling delay + ONE ADC
-// read per calibration call — negligible overhead.
+//   1. Set DAC to initial probe, wait for rail to settle.
+//   2. Read VSH + VD/VG, compute differential error.
+//   3. If |error| <= threshold → done.
+//   4. Nudge probe by error, clamp, repeat up to DAC_CALIB_MAX_ITER.
+//   5. Emit WARN and return best estimate on timeout.
 
-float MOSFETController::calibrateVD(float target_vd, int settling_ms)
+float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 {
-    float probe = target_vd;
+    // Initial probe: use target + current shunt drop as better guess
+    float vsh_init = hal::readShuntVoltageFast(config_.adc_gain_vsh);
+    float probe = target_vds + vsh_init;
     hal::setVDS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
-    float read_back = hal::readVD_Actual();
-    float error     = target_vd - read_back;
 
-    // Fast path: already within tolerance
-    if (fabsf(error) <= VD_GLOBAL_ERROR) {
+    float vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
+    float vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VD
+    float vds_meas = vd_read - vsh;
+    float error    = target_vds - vds_meas;
+
+    // Fast path: differential already within tolerance
+    if (fabsf(error) <= VDS_GLOBAL_ERROR) {
         return probe;
     }
 
-    // Slow path: iterative correction
+    // Slow path: iterative correction on VDS differential
     for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
-        probe += error;  // nudge toward target
-        // Clamp to avoid sending the DAC out of its valid range
+        probe += error;  // nudge DAC probe toward target
         if (probe < 0.0f) probe = 0.0f;
         if (probe > 5.5f) probe = 5.5f;
 
         hal::setVDS(probe);
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
-        read_back = hal::readVD_Actual();
-        error     = target_vd - read_back;
 
-        if (fabsf(error) <= VD_GLOBAL_ERROR) {
-            LOG_DEBUG("[CALIB VD] target=%.3f converged in %d iter(s), probe=%.3f read=%.3f err=%.4f",
-                      target_vd, iter + 1, probe, read_back, error);
+        vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
+        vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VD
+        vds_meas = vd_read - vsh;
+        error    = target_vds - vds_meas;
+
+        if (fabsf(error) <= VDS_GLOBAL_ERROR) {
+            LOG_DEBUG("[CALIB VDS] target=%6.3f converged in %2d iter(s), probe=%6.3f vds_meas=%7.4f err=%+7.4f",
+                      target_vds, iter + 1, probe, vds_meas, error);
             return probe;
         }
     }
 
-    // Give up — emit WARN, keep best estimate
-    float vsh = hal::readShuntVoltage();
-    LOG_WARN("[CALIB VD] FAILED to meet tolerance after %d iters "
-             "| target=%.3fV probe_sent=%.3fV vd_read=%.3fV err=%.4fV (threshold=%.3fV) vsh=%.3fV",
-             DAC_CALIB_MAX_ITER, target_vd, probe, read_back, error, VD_GLOBAL_ERROR, vsh);
+    // Final refresh before logging failure
+    vd_read  = hal::readVD_Actual(config_.adc_gain_vd);
+    vsh      = hal::readShuntVoltage(config_.adc_gain_vsh);
+    vds_meas = vd_read - vsh;
+    error    = target_vds - vds_meas;
+
+    // Extract what the Auto-Ranging actually chose at the end for debug purposes
+    uint8_t gain_vd = hal::HardwareHAL::instance().getShuntADC().getLastUsedGain(1);
+    uint8_t gain_vsh = hal::HardwareHAL::instance().getShuntADC().getLastUsedGain(0);
+
+    LOG_WARN("[CALIB VDS] FAILED | Target: %5.3fV | Meas: %5.3fV | Err: %6.4fV | Probe: %5.3fV | VD: %5.3fV | VS: %5.3fV | Gains: %d/%d",
+             target_vds, vds_meas, error, probe, vd_read, vsh, gain_vd, gain_vsh);
     return probe;
 }
 
-float MOSFETController::calibrateVG(float target_vg, int settling_ms)
+float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 {
-    float probe = target_vg;
+    // Initial probe: use target + current shunt drop as better guess
+    float vsh_init = hal::readShuntVoltageFast(config_.adc_gain_vsh);
+    float probe = target_vgs + vsh_init;
     hal::setVGS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
-    float read_back = hal::readVG_Actual();
-    float error     = target_vg - read_back;
 
-    // Fast path: already within tolerance
-    if (fabsf(error) <= VG_GLOBAL_ERROR) {
+    float vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
+    float vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VG
+    float vgs_meas = vg_read - vsh;
+    float error    = target_vgs - vgs_meas;
+
+    // Fast path
+    if (fabsf(error) <= VGS_GLOBAL_ERROR) {
         return probe;
     }
 
-    // Slow path: iterative correction
+    // Slow path: iterative correction on VGS differential
     for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
         probe += error;
         if (probe < 0.0f) probe = 0.0f;
@@ -336,20 +356,31 @@ float MOSFETController::calibrateVG(float target_vg, int settling_ms)
 
         hal::setVGS(probe);
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
-        read_back = hal::readVG_Actual();
-        error     = target_vg - read_back;
 
-        if (fabsf(error) <= VG_GLOBAL_ERROR) {
-            LOG_DEBUG("[CALIB VG] target=%.3f converged in %d iter(s), probe=%.3f read=%.3f err=%.4f",
-                      target_vg, iter + 1, probe, read_back, error);
+        vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
+        vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VG
+        vgs_meas = vg_read - vsh;
+        error    = target_vgs - vgs_meas;
+
+        if (fabsf(error) <= VGS_GLOBAL_ERROR) {
+            LOG_DEBUG("[CALIB VGS] target=%6.3f converged in %2d iter(s), probe=%6.3f vgs_meas=%7.4f err=%+7.4f",
+                      target_vgs, iter + 1, probe, vgs_meas, error);
             return probe;
         }
     }
 
-    float vsh = hal::readShuntVoltage();
-    LOG_WARN("[CALIB VG] FAILED to meet tolerance after %d iters "
-             "| target=%.3fV probe_sent=%.3fV vg_read=%.3fV err=%.4fV (threshold=%.3fV) vsh=%.3fV",
-             DAC_CALIB_MAX_ITER, target_vg, probe, read_back, error, VG_GLOBAL_ERROR, vsh);
+    // Final refresh before logging failure
+    vg_read  = hal::readVG_Actual(config_.adc_gain_vg);
+    vsh      = hal::readShuntVoltage(config_.adc_gain_vsh);
+    vgs_meas = vg_read - vsh;
+    error    = target_vgs - vgs_meas;
+
+    // Extract what the Auto-Ranging actually chose at the end for debug purposes
+    uint8_t gain_vg = hal::HardwareHAL::instance().getShuntADC().getLastUsedGain(2);
+    uint8_t gain_vsh = hal::HardwareHAL::instance().getShuntADC().getLastUsedGain(0);
+
+    LOG_WARN("[CALIB VGS] FAILED | Target: %5.3fV | Meas: %5.3fV | Err: %6.4fV | Probe: %5.3fV | VG: %5.3fV | VS: %5.3fV | Gains: %d/%d",
+             target_vgs, vgs_meas, error, probe, vg_read, vsh, gain_vg, gain_vsh);
     return probe;
 }
 
@@ -428,40 +459,39 @@ void MOSFETController::performSweep()
         config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
     currentFile_.write((uint8_t*)lineBuf, len);
 
-    // ADC gain metadata
-    const char* gainLabel;
-    switch (config_.adc_gain) {
-        case  0: gainLabel = "GAIN_TWOTHIRDS (±6.144 V)"; break;
-        case  1: gainLabel = "GAIN_ONE (±4.096 V)";       break;
-        case  2: gainLabel = "GAIN_TWO (±2.048 V)";       break;
-        case  4: gainLabel = "GAIN_FOUR (±1.024 V)";      break;
-        case  8: gainLabel = "GAIN_EIGHT (±0.512 V)";     break;
-        case 16: gainLabel = "GAIN_SIXTEEN (±0.256 V)";   break;
-        default: gainLabel = "GAIN_SIXTEEN (±0.256 V)";   break;
-    }
-    len = snprintf(lineBuf, sizeof(lineBuf), "# ADC Gain: %s\n", gainLabel);
+    auto getGainLabel = [](uint8_t g) -> const char* {
+        switch (g) {
+            case  0: return "GAIN_TWOTHIRDS (±6.144 V)";
+            case  1: return "GAIN_ONE (±4.096 V)";
+            case  2: return "GAIN_TWO (±2.048 V)";
+            case  4: return "GAIN_FOUR (±1.024 V)";
+            case  8: return "GAIN_EIGHT (±0.512 V)";
+            case 16: return "GAIN_SIXTEEN (±0.256 V)";
+            case 255: return "AUTO (Dynamic Otimize)";
+            default: return "GAIN_SIXTEEN (±0.256 V)";
+        }
+    };
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# ADC Gains: VSh=%s, VD=%s, VG=%s\n", 
+                   getGainLabel(config_.adc_gain_vsh), 
+                   getGainLabel(config_.adc_gain_vd), 
+                   getGainLabel(config_.adc_gain_vg));
     currentFile_.write((uint8_t*)lineBuf, len);
 
-    // Hardware mode metadata — records which peripherals collected the data
-    if (config_.use_external_hw) {
-        len = snprintf(lineBuf, sizeof(lineBuf),
-            "# Hardware: Fully External (VDS: MCP4725 0x61 12-bit, VGS: MCP4725 0x60 12-bit, ADC: ADS1115 0x48 16-bit)\n");
-    } else {
-        len = snprintf(lineBuf, sizeof(lineBuf),
-            "# Hardware: ESP32 Internal (VDS: DAC 8-bit, VGS: DAC 8-bit, ADC: 12-bit)\n");
-    }
+    // Hardware mode metadata — records reality-based peripheral identification
+    len = snprintf(lineBuf, sizeof(lineBuf), "# %s\n", hal::HardwareHAL::instance().getHardwareSummary().c_str());
     currentFile_.write((uint8_t*)lineBuf, len);
 
     len = snprintf(lineBuf, sizeof(lineBuf), "# Firmware: %s\n", SOFTWARE_VERSION);
     currentFile_.write((uint8_t*)lineBuf, len);
     
-    // Configure ADC gain for shunt measurement
-    if (config_.use_external_hw) {
-        hal::setADC_Gain(config_.adc_gain);
-    }
+    // Configure ADC gain for shunt measurement is now applied dynamically per read
+    // if (config_.use_external_hw) {
+    //    // hal::setADC_Gain(config_.adc_gain);
+    // }
 
-    // Column Headers — new canonical order
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
+    // Column Headers — vds_sent/vgs_sent are the commanded differential setpoints
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
@@ -470,7 +500,7 @@ void MOSFETController::performSweep()
         config_.oversampling > 1 ? "ON" : "OFF", 
         config_.oversampling, 
         config_.settling_ms,
-        config_.adc_gain);
+        config_.adc_gain_vsh);
     
     int rowCount = 0;
     
@@ -489,30 +519,43 @@ void MOSFETController::performSweep()
             float vgs = vgs_start + i_vgs * vgs_step;
             currentVds_ = vgs; // Use for progress display (outer loop var)
 
-            // Calibrate VGS once at the start of this curve
-            float probe_vg = calibrateVG(vgs, settling);
+            // Calibrate VGS once at the start of this curve (differential target)
+            calibrateVGS(vgs, settling);
 
             for (int i_vds = 0; i_vds < inner_steps && measuring_ && !cancelled_; i_vds++) {
                 float vds = vds_start + i_vds * vds_step;
 
-                // VDS changes every step → full calibration every time
-                float probe_vd = calibrateVD(vds, settling);
-                (void)probe_vd; // result used for DAC side-effect; final value not needed
+                // VDS changes every step → full differential calibration every time
+                calibrateVDS(vds, settling);
 
-                // Smart-fast VG verify: one read, re-calibrate only if drifted
+                // ── Verify BOTH axes before taking the measurement ──────────
+                // VGS drift check: re-read differential and re-calibrate if needed
                 {
-                    float vg_now = hal::readVG_Actual();
-                    if (fabsf(vg_now - vgs) > VG_GLOBAL_ERROR) {
-                        probe_vg = calibrateVG(vgs, settling);
+                    float vsh_now  = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vgs_now  = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
+                    if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
+                        calibrateVGS(vgs, settling);
+                    }
+                }
+                // VDS drift check (may have shifted after VGS re-calibration)
+                {
+                    float vsh_now  = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vds_now  = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
+                    if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
+                        calibrateVDS(vds, settling);
                     }
                 }
 
-                float vsh       = hal::readShuntVoltage();
-                float ids       = vsh / rshunt;
-                float vd_actual = hal::readVD_Actual();
-                float vg_actual = hal::readVG_Actual();
-                float vds_true  = vd_actual - vsh;
+                // ── Final verification and data acquisition ──────────
+                float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
+                float vsh_vd    = hal::readShuntVoltage(config_.adc_gain_vsh); // VSH at the time of VD reading
+                float vds_true  = vd_actual - vsh_vd;
+
+                float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
+                float vsh       = hal::readShuntVoltage(config_.adc_gain_vsh); // VSH at the time of VG reading (canonical)
                 float vgs_true  = vg_actual - vsh;
+
+                float ids       = vsh / rshunt;
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
@@ -530,17 +573,20 @@ void MOSFETController::performSweep()
             }
 
             currentFile_.flush();
-            LOG_INFO("VGS=%.3fV streamed. Rows: %d", vgs, rowCount);
-            (void)probe_vg; // used inside inner-loop re-calibration; suppress unused warning
+            LOG_INFO("VGS=%6.3fV streamed. Rows: %d", vgs, rowCount);
         }
 
     } else {
         // Mode: Id vs Vgs sweep (outer = VDS fixed, inner = VGS swept) — default
         // −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−
-        // Calibration strategy for IdVgs:
+        // Calibration strategy for IdVgs (VDS/VGS differential targets):
         //   - VDS does NOT change each inner step → calibrate once per outer
-        //     curve, then do a fast verify-only check at every inner step.
-        //   - VGS sweeps every inner step → always calibrate fully before each read.
+        //     curve with 3× settling, then do a differential drift check before
+        //     every measurement point.
+        //   - VGS sweeps every inner step → always calibrate fully before each
+        //     measurement point.
+        //   - After every VGS calibration, BOTH VDS and VGS differentials are
+        //     verified and corrected if needed before the ADC read.
         for (int i_vds = 0; i_vds < outer_steps && measuring_ && !cancelled_; i_vds++) {
             float vds = vds_start + i_vds * vds_step;
             currentVds_ = vds;
@@ -550,35 +596,49 @@ void MOSFETController::performSweep()
             currentCurve.vds = vds;
             currentCurve.rshunt = rshunt;
 
-            // Calibrate VDS once for this curve; the drain rail should be stable
-            float probe_vd = calibrateVD(vds, settling * 3);
+            // Calibrate VDS once for this curve (differential target, 3× settling)
+            calibrateVDS(vds, settling * 3);
 
             for (int i_vgs = 0; i_vgs < inner_steps && measuring_ && !cancelled_; i_vgs++) {
                 float vgs = vgs_start + i_vgs * vgs_step;
 
-                // VGS changes every step → full calibration every time
-                float probe_vg = calibrateVG(vgs, settling);
-                (void)probe_vg; // result used for DAC side-effect; final value not needed
+                // VGS changes every step → full differential calibration every time
+                calibrateVGS(vgs, settling);
 
-                // Smart-fast VD verify: one read, re-calibrate only if drifted
+                // ── Verify BOTH axes before taking the measurement ──────────
+                // VDS drift check: VDS may shift after VGS changes (coupling)
                 {
-                    float vd_now = hal::readVD_Actual();
-                    if (fabsf(vd_now - vds) > VD_GLOBAL_ERROR) {
-                        probe_vd = calibrateVD(vds, settling);
+                    float vsh_now = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vds_now = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
+                    if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
+                        calibrateVDS(vds, settling);
+                    }
+                }
+                // VGS drift check: re-verify after VDS re-calibration
+                {
+                    float vsh_now = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vgs_now = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
+                    if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
+                        calibrateVGS(vgs, settling);
                     }
                 }
 
+                // Final read — both axes confirmed within tolerance
                 uint32_t t_dac  = millis();
                 uint32_t t_set  = millis();
                 if (settling > 0) vTaskDelay(pdMS_TO_TICKS(settling));
                 uint32_t t_adc  = millis();
-                float vsh       = hal::readShuntVoltage();
+                // ── Final verification and data acquisition ──────────
+                float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
+                float vsh_vd    = hal::readShuntVoltage(config_.adc_gain_vsh);
+                float vds_true_val = vd_actual - vsh_vd;
+
+                float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
+                float vsh       = hal::readShuntVoltage(config_.adc_gain_vsh);
+                float vgs_true_val = vg_actual - vsh;
+
                 uint32_t t_done = millis();
                 float ids       = vsh / rshunt;
-                float vd_actual = hal::readVD_Actual();
-                float vg_actual = hal::readVG_Actual();
-                float vds_true_val = vd_actual - vsh;
-                float vgs_true_val = vg_actual - vsh;
 
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
@@ -600,12 +660,13 @@ void MOSFETController::performSweep()
                 progressPercent_ = (current_point * 100) / total_points;
 
                 if (rowCount % 50 == 1) {
-                    LOG_DEBUG("[TIMING] VGS=%.3fV | DAC write=%lums | Settle=%lums | ADC read=%lums | Total=%lums",
+                    LOG_DEBUG("[TIMING] VGS=%6.3fV | DAC=%4lums Settle=%4lums ADC=%4lums Total=%4lums | vds_true=%6.3f vgs_true=%6.3f",
                               vgs,
                               (unsigned long)(t_set  - t_dac),
                               (unsigned long)(t_adc  - t_set),
                               (unsigned long)(t_done - t_adc),
-                              (unsigned long)(t_done - t_dac));
+                              (unsigned long)(t_done - t_dac),
+                              vds_true_val, vgs_true_val);
                 }
 
                 if (rowCount % 50 == 0) {
@@ -622,8 +683,7 @@ void MOSFETController::performSweep()
                        currentCurve.ss_x1, currentCurve.ss_x2, currentCurve.ss_y1, currentCurve.ss_y2);
 
             currentFile_.flush();
-            LOG_INFO("VDS=%.3fV: Vt=%.3f, SS=%.1f mV/dec, MaxGm=%.2e", vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
-            (void)probe_vd; // used inside inner-loop re-calibration; suppress unused warning
+            LOG_INFO("VDS=%6.3fV: Vt=%6.3f, SS=%6.1f mV/dec, MaxGm=%8.2e", vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
         }
     }
     
@@ -761,7 +821,7 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     // Column Headers — canonical order matching streaming path
-    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
+    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     LOG_INFO("Header written: %u bytes", (unsigned)totalWritten);

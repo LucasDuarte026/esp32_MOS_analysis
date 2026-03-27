@@ -244,7 +244,7 @@ function parseCSV(csvText) {
         const line = lines[i].trim();
 
         // Detect data header row — support both legacy and new format
-        if (line.includes('timestamp,vds') || line.includes('time,vds') ||
+        if (line.includes('timestamp,vds_sent') || line.includes('timestamp,vds') || line.includes('time,vds') ||
             line.includes('timestamp,vd,') || line.includes('time,vd,')) {
             dataStartIndex = i + 1;
         }
@@ -305,8 +305,9 @@ function parseCSV(csvText) {
     const vgsSet = new Set();
 
     // 2. Data Parsing
-    // New format (v7.1.0+): timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids  (9 cols)
-    // Legacy format:        timestamp,vds,vgs,vsh,ids,...                                (7 cols)
+    // New format (v7.2.0+): timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids  (9 cols)
+    // v7.1.0 format:        timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids              (9 cols)
+    // Legacy format:        timestamp,vds,vgs,vsh,ids,...                                           (7 cols)
     for (let i = dataStartIndex; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || line.startsWith('#')) continue;
@@ -316,9 +317,9 @@ function parseCSV(csvText) {
         let vds, vgs, vsh, ids, gm, vd_read, vg_read, vds_true, vgs_true;
 
         if (parts.length >= 9) {
-            // New format: timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids
-            vds = parseFloat(parts[1]);  // commanded vd target
-            vgs = parseFloat(parts[2]);  // commanded vg target
+            // New format: timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids
+            vds = parseFloat(parts[1]);  // commanded vds target (differential setpoint)
+            vgs = parseFloat(parts[2]);  // commanded vgs target (differential setpoint)
             vd_read = parseFloat(parts[3]);
             vg_read = parseFloat(parts[4]);
             vsh = parseFloat(parts[5]);

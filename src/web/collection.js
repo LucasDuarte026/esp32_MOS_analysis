@@ -151,9 +151,14 @@ document.addEventListener('DOMContentLoaded', () => {
             ? parseInt(oversamplingFactorEl ? oversamplingFactorEl.value : '64')
             : 1;
 
-        // Get ADC gain setting
-        const adcGainEl = document.getElementById('adc-gain');
-        const adcGain = adcGainEl ? parseInt(adcGainEl.value) : 2;  // default: GAIN_TWO
+        // Get ADC gain settings
+        const adcGainVshEl = document.getElementById('adc-gain-vsh');
+        const adcGainVdEl = document.getElementById('adc-gain-vd');
+        const adcGainVgEl = document.getElementById('adc-gain-vg');
+        
+        const adcGainVsh = adcGainVshEl ? parseInt(adcGainVshEl.value) : 255;  // Auto default
+        const adcGainVd = adcGainVdEl ? parseInt(adcGainVdEl.value) : 255;     // Auto default
+        const adcGainVg = adcGainVgEl ? parseInt(adcGainVgEl.value) : 255;     // Auto default
 
         const config = {
             vgs_start: vgsStart,
@@ -165,7 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
             rshunt: rshunt,
             settling_ms: (settlingTime === 0 || settlingTime > 0) ? settlingTime : 0,
             oversampling: oversamplingFactor,
-            adc_gain: adcGain,
+            adc_gain_vsh: adcGainVsh,
+            adc_gain_vd: adcGainVd,
+            adc_gain_vg: adcGainVg,
             ext_dac_vref: extDacVref,
             use_external_hw: useExternalHW,
             filename: filename || 'mosfet_data.csv',
@@ -343,6 +350,16 @@ document.getElementById('btn-reset-fields')?.addEventListener('click', () => {
     document.getElementById('rshunt').value = '';
     document.getElementById('settling-time').value = '0';
     document.getElementById('filename').value = '';
+
+    // Hardware ADC Gains
+    const adcGainVshEl = document.getElementById('adc-gain-vsh');
+    if (adcGainVshEl) adcGainVshEl.value = "255"; // Auto default
+    
+    const adcGainVdEl = document.getElementById('adc-gain-vd');
+    if (adcGainVdEl) adcGainVdEl.value = "255"; // Auto default
+    
+    const adcGainVgEl = document.getElementById('adc-gain-vg');
+    if (adcGainVgEl) adcGainVgEl.value = "255"; // Auto default
 });
 
 // Character count for email
@@ -474,13 +491,30 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
          16: { fsr: '0.256', res:   '7.8' },
     };
     function updateGainHint() {
-        const sel = document.getElementById('adc-gain');
+        const selVsh = document.getElementById('adc-gain-vsh');
+        const selVd = document.getElementById('adc-gain-vd');
+        const selVg = document.getElementById('adc-gain-vg');
         const hint = document.getElementById('gain-hint');
-        if (!sel || !hint) return;
-        const info = GAIN_INFO[parseInt(sel.value)] || GAIN_INFO[2];
-        hint.textContent = `FSR: ±${info.fsr} V — Res: ${info.res} µV/LSB`;
+        if (!selVsh && !selVd && !selVg || !hint) return;
+        
+        // We just display the highest required range for the hint (lowest gain code)
+        let minGain = 255; // default Auto
+        
+        let hasFixed = false;
+        if (selVsh && selVsh.value !== "255") { minGain = Math.min(minGain, parseInt(selVsh.value)); hasFixed = true; }
+        if (selVd && selVd.value !== "255")   { minGain = Math.min(minGain, parseInt(selVd.value)); hasFixed = true; }
+        if (selVg && selVg.value !== "255")   { minGain = Math.min(minGain, parseInt(selVg.value)); hasFixed = true; }
+        
+        if (!hasFixed) {
+            hint.textContent = "FSR: Ajuste Automático em Tempo Real (Otimizado)";
+        } else {
+            const info = GAIN_INFO[minGain] || GAIN_INFO[0];
+            hint.textContent = `FSR: ±${info.fsr} V — Res: ${info.res} µV/LSB`;
+        }
     }
-    document.getElementById('adc-gain')?.addEventListener('change', updateGainHint);
+    document.getElementById('adc-gain-vsh')?.addEventListener('change', updateGainHint);
+    document.getElementById('adc-gain-vd')?.addEventListener('change', updateGainHint);
+    document.getElementById('adc-gain-vg')?.addEventListener('change', updateGainHint);
     document.addEventListener('DOMContentLoaded', updateGainHint);
 })();
 
