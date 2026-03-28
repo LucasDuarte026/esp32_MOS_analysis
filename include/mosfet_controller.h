@@ -52,7 +52,7 @@ struct SweepConfig {
     float rshunt;               ///< Shunt resistor (Ω); Ids = Vsh / Rshunt
     int   settling_ms;          ///< Wait after setting a new voltage before sampling (ms)
     uint16_t oversampling = 16; ///< ADC samples averaged per point (1 = off, 16 = default)
-    uint8_t  adc_gain_vsh = 2;  ///< ADS1115 PGA gain for Shunt (A0): 0(±6.144V), 1(±4.096V), 2(±2.048V), 4(±1.024V), 8(±0.512V), 16(±0.256V)
+    uint8_t  adc_gain_vsh = 255;  ///< 255=AUTO per channel (A0/A3); else fixed PGA for shunt reads
     uint8_t  adc_gain_vd  = 0;  ///< ADS1115 PGA gain for VD (A1): Usually 0 for ±6.144V
     uint8_t  adc_gain_vg  = 0;  ///< ADS1115 PGA gain for VG (A2): Usually 0 for ±6.144V
     float    ext_dac_vref = 5.0f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.

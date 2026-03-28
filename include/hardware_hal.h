@@ -150,9 +150,43 @@ constexpr uint8_t  ADC_SHUNT_PIN  = 34;  // ADC1_CH6       — reads shunt resis
 constexpr uint8_t  ADC_SHUNT_NOM_CH    = 0;  // Direct shunt (low precision)
 constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // Amplified shunt (high precision via LT1013)
 
-// Amplified Shunt Gain Parameters
-constexpr float    SHUNT_AMP_GAIN      = 99.712871287f; // Precise calibration
-constexpr float    SHUNT_AMP_INV_GAIN  = 1.0f / SHUNT_AMP_GAIN;
+// Amplified Shunt Gain Parameters (A3: vsh_precise = f(raw_a3_volts))
+constexpr float    SHUNT_AMP_GAIN      = 31.303951368f;
+constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.303951368f;
+
+/**
+ * DC offset (V) subtracted from (raw_a3 * SHUNT_AMP_GAIN_INV): LM358 / ground-bounce vs shunt GND.
+ * Set to 0.f to disable. Tune from CSV (vsh_precise vs vsh in linear region).
+ */
+constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.072f;
+
+/** If A3 ADC voltage (before gain) is >= this, use A0 direct shunt for Ids (amplifier saturation). */
+constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 3.0f;
+
+/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LM358 gain, then − offset. */
+inline float shuntAmplifiedAdcToVoltage(float raw_a3_volts) {
+    float v = raw_a3_volts * SHUNT_AMP_GAIN_INV;
+    if (v > SHUNT_AMP_A3_OFFSET_V) {
+        v -= SHUNT_AMP_A3_OFFSET_V;
+    } else {
+        v = 0.f;
+    }
+    return v;
+}
+
+/** PGA code 255 = auto-range per ADS1115 channel (independent lastAutoGain_[ch]). */
+constexpr uint8_t  ADC_GAIN_AUTO = 255;
+
+/**
+ * Single coherent shunt sample: A3 (fast, auto PGA) then A0 (oversampled, auto PGA).
+ * vsh_for_ids uses A3 scaled unless raw_a3 >= threshold, then A0 (no amp gain).
+ */
+struct ShuntSample {
+    float vsh_a0 = 0.f;
+    float raw_a3 = 0.f;
+    float vsh_precise = 0.f;
+    float vsh_for_ids = 0.f;
+};
 
 // Internal DAC (ESP32 — 8-bit, 0–3.3 V)
 constexpr uint8_t  DAC_RESOLUTION  = 8;
@@ -399,6 +433,13 @@ public:
     /** Fast specialized reading methods for iterative calibration */
     float readShuntVoltageFast(uint8_t gainCode = 255); 
     float readShuntVoltageAMPFast(uint8_t gainCode);
+    /** Raw A3 voltage at ADS1115 input (before ÷ gain). */
+    float readShuntVoltageAMPRawFast(uint8_t gainCode);
+    /** Shunt voltage for Ids / differential calibration: A3 scaled if A3 < threshold, else A0. */
+    float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255);
+    float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255);
+    /** A3 fast then A0 oversampled; PGA auto when gainCode == ADC_GAIN_AUTO. */
+    ShuntSample measureShuntSample(uint8_t gainCode = 255);
     float readVD_ActualFast(uint8_t gainCode = 255);
     float readVG_ActualFast(uint8_t gainCode = 255);
 
@@ -426,6 +467,8 @@ private:
 
     HardwareMode currentMode_ = HardwareMode::HW_EXTERNAL;
     bool         initialized_ = false;
+    /** True when shunt ADC is ADS1115 (A0/A3 auto-range); false for InternalADC fallback. */
+    bool         shunt_adc_external_ = false;
 };
 
 // ============================================================================
@@ -439,6 +482,10 @@ float readVD_Actual(uint8_t gainCode = 255);
 float readVG_Actual(uint8_t gainCode = 255);
 float readShuntVoltageFast(uint8_t gainCode = 255);
 float readShuntVoltageAMPFast(uint8_t gainCode);
+float readShuntVoltageAMPRawFast(uint8_t gainCode);
+float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255);
+float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255);
+ShuntSample measureShuntSample(uint8_t gainCode = 255);
 float readVD_ActualFast(uint8_t gainCode = 255);
 float readVG_ActualFast(uint8_t gainCode = 255);
 void  setADC_Gain(uint8_t gainCode);

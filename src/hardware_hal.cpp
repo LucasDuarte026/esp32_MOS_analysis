@@ -263,16 +263,21 @@ float ExternalADC::readVoltage() {
 
 float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     if (!initialized_) return 0.0f;
-    
+
+    // AUTO (255): run fast auto-range first so lastAutoGain_[ch] + fsr_ match the next conversion.
+    // Oversampled path used to use stale lastAutoGain_ without re-ranging → wrong fsr vs raw counts.
+    uint8_t gCode = gainOverride;
+    if (gCode == 255) {
+        readVoltageFast(channel, 255);
+        gCode = lastAutoGain_[channel];
+    }
+
     // Protection context: we take the I2C mutex for the entire oversampled sequence
     if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(1000)) != pdTRUE) {
         LOG_ERROR("I2C Timeout in readVoltage (Ch%d)", channel);
         return 0.0f;
     }
 
-    bool autoRange = (gainOverride == 255);
-    uint8_t gCode = autoRange ? lastAutoGain_[channel] : gainOverride;
-    
     if (gCode != currentGainCode_) {
         setGain(gCode, true);
     }
@@ -314,7 +319,7 @@ float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     float voltage = avgRaw * (fsr_ / static_cast<float>(EXT_ADC_MAX_RAW));
     
     if (channel == ADC_SHUNT_AMP_CH) {
-        return voltage * SHUNT_AMP_INV_GAIN;
+        return shuntAmplifiedAdcToVoltage(voltage);
     }
     return voltage;
 }
@@ -373,8 +378,8 @@ float ExternalADC::readVoltageFast(uint8_t channel, uint8_t gainOverride) {
             changed = true;
         }
         
+        lastAutoGain_[channel] = gCode;
         if (changed) {
-            lastAutoGain_[channel] = gCode;
             LOG_INFO("[AUTO-GAIN] Ch%d: code %d (FSR=%+.3fV)", channel, gCode, fsr_);
         }
     }
@@ -505,6 +510,7 @@ void HardwareHAL::initInternal(const HalConfig& config) {
     auto adc = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
     adc->begin();
     adcShunt_ = std::move(adc);
+    shunt_adc_external_ = false;
 
     LOG_INFO("  [INTERNAL] VDS: InternalDAC GPIO%d (8-bit, %.1f mV/step) [PROVISIONAL]",
              DAC_VDS_PIN, dacVDS_->getResolution() * 1000.0f);
@@ -548,8 +554,10 @@ void HardwareHAL::initExternal(const HalConfig& config) {
         auto adc_fallback = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
         adc_fallback->begin();
         adcShunt_ = std::move(adc_fallback);
+        shunt_adc_external_ = false;
     } else {
         adcShunt_ = std::move(adc);
+        shunt_adc_external_ = true;
     }
 
     LOG_INFO("  [EXTERNAL] VDS: InternalDAC  GPIO%d (8-bit, %.1f mV/step) [PROVISIONAL]",
@@ -625,8 +633,53 @@ float HardwareHAL::readShuntVoltageFast(uint8_t gainCode) {
 }
 
 float HardwareHAL::readShuntVoltageAMPFast(uint8_t gainCode) {
-    float rawVoltage = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode); // Channel 3
-    return rawVoltage / SHUNT_AMP_GAIN; // SHUNT_AMP_GAIN is 99.712871287
+    float rawVoltage = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    return shuntAmplifiedAdcToVoltage(rawVoltage);
+}
+
+float HardwareHAL::readShuntVoltageAMPRawFast(uint8_t gainCode) {
+    return adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+}
+
+float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode) {
+    if (!shunt_adc_external_) {
+        return readShuntVoltage(gainCode);
+    }
+    // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
+    float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+        return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+    }
+    return shuntAmplifiedAdcToVoltage(raw_a3);
+}
+
+float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode) {
+    if (!shunt_adc_external_) {
+        return readShuntVoltageFast(gainCode);
+    }
+    // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
+    float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+        return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
+    }
+    return shuntAmplifiedAdcToVoltage(raw_a3);
+}
+
+ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode) {
+    ShuntSample s;
+    if (!shunt_adc_external_) {
+        s.vsh_a0 = readShuntVoltage(gainCode);
+        s.raw_a3 = 0.f;
+        s.vsh_precise = s.vsh_a0;
+        s.vsh_for_ids = s.vsh_a0;
+        return s;
+    }
+    // A3 then A0: each read uses its own lastAutoGain_[ch] when gainCode == ADC_GAIN_AUTO
+    s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
+    s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+    s.vsh_for_ids = (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) ? s.vsh_a0 : s.vsh_precise;
+    return s;
 }
 
 float HardwareHAL::readVD_ActualFast(uint8_t gainCode) {
@@ -663,6 +716,10 @@ float readVD_Actual(uint8_t gainCode)         { return HardwareHAL::instance().r
 float readVG_Actual(uint8_t gainCode)         { return HardwareHAL::instance().readVG_Actual(gainCode); }
 float readShuntVoltageFast(uint8_t gainCode)  { return HardwareHAL::instance().readShuntVoltageFast(gainCode); }
 float readShuntVoltageAMPFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPFast(gainCode); }
+float readShuntVoltageAMPRawFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPRawFast(gainCode); }
+float readShuntVoltageEffectiveForIds(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageEffectiveForIds(gainCode); }
+float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageEffectiveForIdsFast(gainCode); }
+ShuntSample measureShuntSample(uint8_t gainCode) { return HardwareHAL::instance().measureShuntSample(gainCode); }
 float readVD_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVD_ActualFast(gainCode); }
 float readVG_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVG_ActualFast(gainCode); }
 void setADC_Gain(uint8_t g)   { HardwareHAL::instance().setADC_Gain(g); }

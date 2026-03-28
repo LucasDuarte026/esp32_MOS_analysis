@@ -279,13 +279,13 @@ float MOSFETController::readAnalogVoltage()
 float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 {
     // Initial probe: use target + current shunt drop as better guess
-    float vsh_init = hal::readShuntVoltageFast(config_.adc_gain_vsh);
+    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
     float probe = target_vds + vsh_init;
     hal::setVDS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
     float vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
-    float vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VD
+    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
     float vds_meas = vd_read - vsh;
     float error    = target_vds - vds_meas;
 
@@ -304,7 +304,7 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
         vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
-        vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VD
+        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
         vds_meas = vd_read - vsh;
         error    = target_vds - vds_meas;
 
@@ -317,7 +317,7 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 
     // Final refresh before logging failure
     vd_read  = hal::readVD_Actual(config_.adc_gain_vd);
-    vsh      = hal::readShuntVoltage(config_.adc_gain_vsh);
+    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
     vds_meas = vd_read - vsh;
     error    = target_vds - vds_meas;
 
@@ -333,13 +333,13 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 {
     // Initial probe: use target + current shunt drop as better guess
-    float vsh_init = hal::readShuntVoltageFast(config_.adc_gain_vsh);
+    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
     float probe = target_vgs + vsh_init;
     hal::setVGS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
     float vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
-    float vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VG
+    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
     float vgs_meas = vg_read - vsh;
     float error    = target_vgs - vgs_meas;
 
@@ -358,7 +358,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
         vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
-        vsh      = hal::readShuntVoltageFast(config_.adc_gain_vsh); // Update VSH immediately after VG
+        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
         vgs_meas = vg_read - vsh;
         error    = target_vgs - vgs_meas;
 
@@ -371,7 +371,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 
     // Final refresh before logging failure
     vg_read  = hal::readVG_Actual(config_.adc_gain_vg);
-    vsh      = hal::readShuntVoltage(config_.adc_gain_vsh);
+    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
     vgs_meas = vg_read - vsh;
     error    = target_vgs - vgs_meas;
 
@@ -487,13 +487,19 @@ void MOSFETController::performSweep()
 
     len = snprintf(lineBuf, sizeof(lineBuf), "# Firmware: %s\n", SOFTWARE_VERSION);
     currentFile_.write((uint8_t*)lineBuf, len);
+
+    len = snprintf(lineBuf, sizeof(lineBuf),
+                    "# Shunt: LM358_gain=%.9f | A3_DC_offset=%.4fV (sw) | Ids: A3 corrected if A3<%.1fV else A0 | PGA: %s\n",
+                    hal::SHUNT_AMP_GAIN, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
+                    (config_.adc_gain_vsh == hal::ADC_GAIN_AUTO) ? "AUTO (oversampled primed by fast)" : "fixed");
+    currentFile_.write((uint8_t*)lineBuf, len);
     
     // Configure ADC gain for shunt measurement is now applied dynamically per read
     // if (config_.use_external_hw) {
     //    // hal::setADC_Gain(config_.adc_gain);
     // }
 
-    // Column Headers — vsh = ADS1115 A0 (direct shunt), vsh_precise = A3 (amplified ÷ gain)
+    // vsh=A0 (oversampled); vsh_precise=A3*gain_inv (fast); ids uses vsh_for_ids (see # Shunt line)
     len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
@@ -534,7 +540,7 @@ void MOSFETController::performSweep()
                 // ── Verify BOTH axes before taking the measurement ──────────
                 // VGS drift check: re-read differential and re-calibrate if needed
                 {
-                    float vsh_now  = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
                     float vgs_now  = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
                     if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
                         calibrateVGS(vgs, settling);
@@ -542,7 +548,7 @@ void MOSFETController::performSweep()
                 }
                 // VDS drift check (may have shifted after VGS re-calibration)
                 {
-                    float vsh_now  = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
                     float vds_now  = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
                     if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
                         calibrateVDS(vds, settling);
@@ -552,20 +558,15 @@ void MOSFETController::performSweep()
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                float vsh_lowres = hal::readShuntVoltage(config_.adc_gain_vsh); 
-                
-                // Read amplified shunt (A3) for the new column and canonical calculations
-                float vsh_precise = hal::readShuntVoltageAMPFast(config_.adc_gain_vsh);
-
-                // User requested: no logic, just use precise for calculations and graph
-                float vsh       = vsh_precise; 
-                float vds_true  = vd_actual - vsh;
-                float vgs_true  = vg_actual - vsh;
-                float ids       = vsh / rshunt;
+                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh);
+                float vsh_for_ids = sh.vsh_for_ids;
+                float vds_true  = vd_actual - vsh_for_ids;
+                float vgs_true  = vg_actual - vsh_for_ids;
+                float ids       = vsh_for_ids / rshunt;
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh_lowres, vsh_precise,
+                           vd_actual, vg_actual, sh.vsh_a0, sh.vsh_precise,
                            vds_true, vgs_true, ids);
 
                 rowCount++;
@@ -614,7 +615,7 @@ void MOSFETController::performSweep()
                 // ── Verify BOTH axes before taking the measurement ──────────
                 // VDS drift check: VDS may shift after VGS changes (coupling)
                 {
-                    float vsh_now = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
                     float vds_now = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
                     if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
                         calibrateVDS(vds, settling);
@@ -622,7 +623,7 @@ void MOSFETController::performSweep()
                 }
                 // VGS drift check: re-verify after VDS re-calibration
                 {
-                    float vsh_now = hal::readShuntVoltage(config_.adc_gain_vsh);
+                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
                     float vgs_now = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
                     if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
                         calibrateVGS(vgs, settling);
@@ -637,34 +638,28 @@ void MOSFETController::performSweep()
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                float vsh_lowres = hal::readShuntVoltage(config_.adc_gain_vsh);
+                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh);
+                float vsh_for_ids = sh.vsh_for_ids;
 
-                // Read amplified shunt (A3) for the new column and canonical calculations
-                float vsh_precise = hal::readShuntVoltageAMPFast(config_.adc_gain_vsh);
-
-                // Use the best available shunt for canonical IDs/TrueVoltages
-                float vsh = (vsh_precise < 0.032f) ? vsh_precise : vsh_lowres;
-
-                float vds_true_val = vd_actual - vsh;
-                float vgs_true_val = vg_actual - vsh;
+                float vds_true_val = vd_actual - vsh_for_ids;
+                float vgs_true_val = vg_actual - vsh_for_ids;
                 uint32_t t_done = millis();
-                float ids       = vsh / rshunt;
+                float ids       = vsh_for_ids / rshunt;
 
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
                 currentCurve.ids.push_back(ids);
-                // Archive A0 vs A3 explicitly; ids/v*_true use blended vsh above
-                currentCurve.vsh.push_back(vsh_lowres);
+                currentCurve.vsh.push_back(sh.vsh_a0);
                 currentCurve.vd_read.push_back(vd_actual);
                 currentCurve.vg_read.push_back(vg_actual);
                 currentCurve.vds_true.push_back(vds_true_val);
                 currentCurve.vgs_true.push_back(vgs_true_val);
-                currentCurve.vsh_precise.push_back(vsh_precise);
+                currentCurve.vsh_precise.push_back(sh.vsh_precise);
                 currentCurve.timestamps.push_back(millis());
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh_lowres, vsh_precise,
+                           vd_actual, vg_actual, sh.vsh_a0, sh.vsh_precise,
                            vds_true_val, vgs_true_val, ids);
 
                 rowCount++;

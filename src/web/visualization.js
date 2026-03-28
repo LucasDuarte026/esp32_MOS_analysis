@@ -301,7 +301,7 @@ function parseCSV(csvText) {
         const parts = line.split(',');
         if (parts.length < 5) continue;
 
-        let vds, vgs, vsh, ids, gm=0, vd_read, vg_read, vds_true, vgs_true;
+        let vds, vgs, vsh, vsh_precise, ids, gm=0, vd_read, vg_read, vds_true, vgs_true;
 
         // Dynamic mapping based on detected indices
         vds = parseFloat(parts[colMap.vds || colMap.vd || colMap.vds_sent || 1]);
@@ -309,9 +309,10 @@ function parseCSV(csvText) {
         vd_read = parseFloat(parts[colMap.vd_read || 3]);
         vg_read = parseFloat(parts[colMap.vg_read || 4]);
         vsh = parseFloat(parts[colMap.vsh || 5]);
-        vds_true = parseFloat(parts[colMap.vds_true || 6]);
-        vgs_true = parseFloat(parts[colMap.vgs_true || 7]);
-        ids = parseFloat(parts[colMap.ids || 8]);
+        vsh_precise = parseFloat(parts[colMap.vsh_precise || 6]);
+        vds_true = parseFloat(parts[colMap.vds_true || 7]);
+        vgs_true = parseFloat(parts[colMap.vgs_true || 8]);
+        ids = parseFloat(parts[colMap.ids || 9]);
 
         // Specific override if vds_true/vgs_true are missing (7-col legacy)
         if (isNaN(vds_true)) vds_true = vds;
@@ -341,6 +342,7 @@ function parseCSV(csvText) {
                 vds: vdsRounded,       // commanded target
                 vgs: vgsRounded,       // commanded target
                 vsh: isNaN(vsh) ? 0 : vsh,
+                vsh_precise: isNaN(vsh_precise) ? (isNaN(vsh) ? 0 : vsh) : vsh_precise,
                 ids: isNaN(ids) ? 0 : ids,
                 gm: isNaN(gm) ? 0 : gm,
                 vd_read: isNaN(vd_read) ? vds : vd_read,
@@ -503,9 +505,11 @@ function updatePlotsMultiCurve() {
 
     const isVDSMode = currentSweepMode === 'VDS';
 
-    // Colors
+    // Colors — primary shunt traces: vsh (blue), vsh_precise (red)
     const colors = {
-        ids: '#2196F3', gm: '#FF9800', ss: '#F44336', vt: '#4CAF50', tangent: '#E91E63'
+        vsh: '#2196F3',
+        vsh_precise: '#F44336',
+        gm: '#FF9800', ss: '#AB47BC', vt: '#4CAF50', tangent: '#E91E63'
     };
 
     // ── Filter Data ─────────────────────────────────────────────────────────
@@ -534,21 +538,19 @@ function updatePlotsMultiCurve() {
 
     const xData = plotData.map(d => isVDSMode ? d.vds_true : d.vgs_true);
 
-    // ── Traces ──────────────────────────────────────────────────────────────
-    // 1. Ids trace (always present)
+    // ── Traces — test view: shunt voltages (A0 vs A3 scaled), not Ids
     const traces = [{
         x: xData,
-        y: plotData.map(d => Math.abs(d.ids)),
+        y: plotData.map(d => Math.abs(d.vsh)),
         mode: 'lines',
-        name: 'Ids (A) [Lupa/Precise]',
-        line: { color: colors.ids, width: 2 }
+        name: 'Vsh (A0)',
+        line: { color: colors.vsh, width: 2 }
     }, {
         x: xData,
-        y: plotData.map(d => Math.abs(d.vsh / (d.r_shunt || 100.0))), 
+        y: plotData.map(d => Math.abs(d.vsh_precise)),
         mode: 'lines',
-        name: 'Ids (A) [Bruto/LowRes]',
-        visible: 'legendonly', // Hidden by default
-        line: { color: '#9e9e9e', width: 1, dash: 'dash' }
+        name: 'Vsh precise (A3)',
+        line: { color: colors.vsh_precise, width: 2 }
     }];
 
     // 2. Gm trace — only in VGS mode (transfer curves)
@@ -611,9 +613,9 @@ function updatePlotsMultiCurve() {
         title: plotTitle,
         xaxis: { title: xAxisTitle },
         yaxis: {
-            title: 'Ids (Precise) [A]',
-            titlefont: { color: '#2196F3' },
-            tickfont: { color: '#2196F3' },
+            title: 'Tensão shunt (V)',
+            titlefont: { color: '#e0e0e0' },
+            tickfont: { color: '#e0e0e0' },
             type: isVDSMode ? 'linear' : scaleType,  // IdVd always linear
             exponentformat: 'e'
         },
