@@ -196,8 +196,8 @@ private:
         std::vector<float>    vgs;       ///< Commanded VGS target
         std::vector<float>    ids;
         std::vector<float>    gm;
-        std::vector<float>    vsh;
-        std::vector<float>    vsh_precise;
+        std::vector<float>    vsh;           ///< A0 direct shunt (CSV column; not the blend used for ids)
+        std::vector<float>    vsh_precise;     ///< A3 amplified ÷ gain (CSV column)
         std::vector<float>    vd_read;
         std::vector<float>    vg_read;
         std::vector<float>    vds_true;  ///< True VDS = vd_read - vsh

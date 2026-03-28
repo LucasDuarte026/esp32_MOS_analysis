@@ -237,6 +237,7 @@ function parseCSV(csvText) {
     uniqueVDSValues = [];
     const lines = csvText.trim().split('\n');
     let dataStartIndex = -1;
+    let rShunt = 100.0; // Default fallback
     const analysisMap = {};
 
     let colMap = {
@@ -262,6 +263,11 @@ function parseCSV(csvText) {
         if (line.startsWith('# Sweep Mode:')) {
             const modeMatch = line.match(/# Sweep Mode:\s*(VGS|VDS)/i);
             if (modeMatch) currentSweepMode = modeMatch[1].toUpperCase();
+        }
+
+        if (line.startsWith('# RSHUNT=')) {
+            const rMatch = line.match(/# RSHUNT=([\d\.]+)/);
+            if (rMatch) rShunt = parseFloat(rMatch[1]);
         }
         // ... rest of metadata scan ...
         if (line.startsWith('# VDS=')) {
@@ -341,6 +347,7 @@ function parseCSV(csvText) {
                 vg_read: isNaN(vg_read) ? vgs : vg_read,
                 vds_true: vdsTrueRounded,  // true terminal VDS (for plot x-axis)
                 vgs_true: vgsTrueRounded,  // true terminal VGS (for plot x-axis)
+                r_shunt: rShunt,           // Store for later trace calculation
                 vt: vt,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
@@ -537,7 +544,7 @@ function updatePlotsMultiCurve() {
         line: { color: colors.ids, width: 2 }
     }, {
         x: xData,
-        y: plotData.map(d => Math.abs(d.vsh / rShuntValue)), // d.vsh is the low-res (Idx 5)
+        y: plotData.map(d => Math.abs(d.vsh / (d.r_shunt || 100.0))), 
         mode: 'lines',
         name: 'Ids (A) [Bruto/LowRes]',
         visible: 'legendonly', // Hidden by default

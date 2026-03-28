@@ -493,7 +493,7 @@ void MOSFETController::performSweep()
     //    // hal::setADC_Gain(config_.adc_gain);
     // }
 
-    // Column Headers — v9.0.12+: added vsh_precise (A3)
+    // Column Headers — vsh = ADS1115 A0 (direct shunt), vsh_precise = A3 (amplified ÷ gain)
     len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
@@ -653,7 +653,8 @@ void MOSFETController::performSweep()
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
                 currentCurve.ids.push_back(ids);
-                currentCurve.vsh.push_back(vsh);
+                // Archive A0 vs A3 explicitly; ids/v*_true use blended vsh above
+                currentCurve.vsh.push_back(vsh_lowres);
                 currentCurve.vd_read.push_back(vd_actual);
                 currentCurve.vg_read.push_back(vg_actual);
                 currentCurve.vds_true.push_back(vds_true_val);
@@ -663,7 +664,7 @@ void MOSFETController::performSweep()
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh, vsh_precise,
+                           vd_actual, vg_actual, vsh_lowres, vsh_precise,
                            vds_true_val, vgs_true_val, ids);
 
                 rowCount++;
