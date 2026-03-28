@@ -26,8 +26,8 @@
 // ============================================================================
 /// Maximum allowed VDS read-back error (|VD_read - VSH - target_vds|) before
 /// entering the correction loop [V].
-#define VDS_GLOBAL_ERROR   0.020f
-#define VGS_GLOBAL_ERROR   0.010f
+#define VDS_GLOBAL_ERROR   0.010f
+#define VGS_GLOBAL_ERROR   0.050f
 /// Maximum correction iterations before giving up and keeping best estimate
 #define DAC_CALIB_MAX_ITER 10
 
@@ -197,6 +197,7 @@ private:
         std::vector<float>    ids;
         std::vector<float>    gm;
         std::vector<float>    vsh;
+        std::vector<float>    vsh_precise;
         std::vector<float>    vd_read;
         std::vector<float>    vg_read;
         std::vector<float>    vds_true;  ///< True VDS = vd_read - vsh

@@ -81,7 +81,7 @@ void logToSerialAsync(const char* msg);
 // Internal sink macros — write to Serial (async) and the web log buffer
 // ============================================================================
 #define WEB_LOG_DEBUG(fmt, ...) do { \
-    char rawBuf[512]; \
+    char rawBuf[256]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
     String _dbgMsg = String("[DEBUG] ") + rawBuf; \
     logToSerialAsync(_dbgMsg.c_str()); \
@@ -89,7 +89,7 @@ void logToSerialAsync(const char* msg);
 } while(0)
 
 #define WEB_LOG_INFO(fmt, ...) do { \
-    char rawBuf[512]; \
+    char rawBuf[256]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
     String _infoMsg = String("[INFO] ") + rawBuf; \
     logToSerialAsync(_infoMsg.c_str()); \
@@ -97,7 +97,7 @@ void logToSerialAsync(const char* msg);
 } while(0)
 
 #define WEB_LOG_WARN(fmt, ...) do { \
-    char rawBuf[512]; \
+    char rawBuf[256]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
     String _warnMsg = String("[WARN] ") + rawBuf; \
     logToSerialAsync(_warnMsg.c_str()); \
@@ -105,7 +105,7 @@ void logToSerialAsync(const char* msg);
 } while(0)
 
 #define WEB_LOG_ERROR(fmt, ...) do { \
-    char rawBuf[512]; \
+    char rawBuf[256]; \
     snprintf(rawBuf, sizeof(rawBuf), fmt, ##__VA_ARGS__); \
     String _errMsg = String("[ERROR] ") + rawBuf; \
     logToSerialAsync(_errMsg.c_str()); \

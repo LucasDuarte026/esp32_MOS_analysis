@@ -459,6 +459,9 @@ void MOSFETController::performSweep()
         config_.oversampling > 1 ? "enabled" : "disabled", config_.oversampling);
     currentFile_.write((uint8_t*)lineBuf, len);
 
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Sweep Mode: %s\n", sweepVDS ? "VDS" : "VGS");
+    currentFile_.write((uint8_t*)lineBuf, len);
+
     auto getGainLabel = [](uint8_t g) -> const char* {
         switch (g) {
             case  0: return "GAIN_TWOTHIRDS (±6.144 V)";
@@ -490,8 +493,8 @@ void MOSFETController::performSweep()
     //    // hal::setADC_Gain(config_.adc_gain);
     // }
 
-    // Column Headers — vds_sent/vgs_sent are the commanded differential setpoints
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
+    // Column Headers — v9.0.12+: added vsh_precise (A3)
+    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
@@ -548,18 +551,22 @@ void MOSFETController::performSweep()
 
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
-                float vsh_vd    = hal::readShuntVoltage(config_.adc_gain_vsh); // VSH at the time of VD reading
-                float vds_true  = vd_actual - vsh_vd;
-
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                float vsh       = hal::readShuntVoltage(config_.adc_gain_vsh); // VSH at the time of VG reading (canonical)
-                float vgs_true  = vg_actual - vsh;
+                float vsh_lowres = hal::readShuntVoltage(config_.adc_gain_vsh); 
+                
+                // Read amplified shunt (A3) for the new column and canonical calculations
+                float vsh_precise = hal::readShuntVoltageAMPFast(config_.adc_gain_vsh);
 
+                // Use the best available shunt for canonical IDs/TrueVoltages
+                float vsh = (vsh_precise < 0.032f) ? vsh_precise : vsh_lowres;
+
+                float vds_true  = vd_actual - vsh;
+                float vgs_true  = vg_actual - vsh;
                 float ids       = vsh / rshunt;
 
-                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh,
+                           vd_actual, vg_actual, vsh, vsh_precise,
                            vds_true, vgs_true, ids);
 
                 rowCount++;
@@ -630,13 +637,17 @@ void MOSFETController::performSweep()
                 uint32_t t_adc  = millis();
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
-                float vsh_vd    = hal::readShuntVoltage(config_.adc_gain_vsh);
-                float vds_true_val = vd_actual - vsh_vd;
-
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                float vsh       = hal::readShuntVoltage(config_.adc_gain_vsh);
-                float vgs_true_val = vg_actual - vsh;
+                float vsh_lowres = hal::readShuntVoltage(config_.adc_gain_vsh);
 
+                // Read amplified shunt (A3) for the new column and canonical calculations
+                float vsh_precise = hal::readShuntVoltageAMPFast(config_.adc_gain_vsh);
+
+                // Use the best available shunt for canonical IDs/TrueVoltages
+                float vsh = (vsh_precise < 0.032f) ? vsh_precise : vsh_lowres;
+
+                float vds_true_val = vd_actual - vsh;
+                float vgs_true_val = vg_actual - vsh;
                 uint32_t t_done = millis();
                 float ids       = vsh / rshunt;
 
@@ -648,11 +659,12 @@ void MOSFETController::performSweep()
                 currentCurve.vg_read.push_back(vg_actual);
                 currentCurve.vds_true.push_back(vds_true_val);
                 currentCurve.vgs_true.push_back(vgs_true_val);
+                currentCurve.vsh_precise.push_back(vsh_precise);
                 currentCurve.timestamps.push_back(millis());
 
-                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh,
+                           vd_actual, vg_actual, vsh, vsh_precise,
                            vds_true_val, vgs_true_val, ids);
 
                 rowCount++;
@@ -821,7 +833,7 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     // Column Headers — canonical order matching streaming path
-    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids\n");
+    len = snprintf(lineBuf, sizeof(lineBuf), "timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     LOG_INFO("Header written: %u bytes", (unsigned)totalWritten);
@@ -831,13 +843,14 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     // Write Data - use snprintf for reliable formatting
     for(const auto& res : results) {
         for(size_t i=0; i<res.vgs.size(); i++) {
-            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.4f,%.4f,%.6e\n",
+            len = snprintf(lineBuf, sizeof(lineBuf), "%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                 (unsigned long)res.timestamps[i],
                 res.vds,
                 res.vgs[i],
                 res.vd_read[i],
                 res.vg_read[i],
                 res.vsh[i],
+                res.vsh_precise[i],
                 res.vds_true[i],
                 res.vgs_true[i],
                 res.ids[i]

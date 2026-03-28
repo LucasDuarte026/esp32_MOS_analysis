@@ -239,107 +239,77 @@ function parseCSV(csvText) {
     let dataStartIndex = -1;
     const analysisMap = {};
 
+    let colMap = {
+        timestamp: 0, vd: 1, vg: 2, vds_sent: 1, vgs_sent: 2, vds: 1, vgs: 2,
+        vd_read: 3, vg_read: 4, vsh: 5, vsh_precise: 6, vds_true: 7, vgs_true: 8, ids: 9
+    };
+
     // 1. Header & Metadata Scan
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        // Detect data header row — support both legacy and new format
-        if (line.includes('timestamp,vds_sent') || line.includes('timestamp,vds') || line.includes('time,vds') ||
-            line.includes('timestamp,vd,') || line.includes('time,vd,')) {
+        // Detect data header row and build column map
+        if (line.includes('timestamp,') || line.includes('time,vds')) {
             dataStartIndex = i + 1;
+            const headers = line.split(',');
+            headers.forEach((h, idx) => {
+                const clean = h.trim().toLowerCase();
+                colMap[clean] = idx;
+            });
+            dbg('CSV', `Detected headers: ${headers.join('|')}`);
         }
 
         if (line.startsWith('# Sweep Mode:')) {
             const modeMatch = line.match(/# Sweep Mode:\s*(VGS|VDS)/i);
             if (modeMatch) currentSweepMode = modeMatch[1].toUpperCase();
         }
-
+        // ... rest of metadata scan ...
         if (line.startsWith('# VDS=')) {
-            // Parse Metadata (Vt, SS, Tangents)
             try {
                 const vdsMatch = line.match(/VDS=([\d\.]+)V/);
                 const vtMatch = line.match(/Vt=([\d\.]+)V/);
                 const ssMatch = line.match(/SS=([0-9\.]+)\s?mV\/dec/);
                 const gmMatch = line.match(/MaxGm=([0-9\.eE\-\+]+)\s?S/);
-                const tanVgsMatch = line.match(/SS_Tangent_VGS:([\d\.\-]+),([\d\.\-]+)/);
-                const tanLogMatch = line.match(/SS_Tangent_LogId:([\d\.\-]+),([\d\.\-]+)/);
-
+                
                 if (vdsMatch) {
                     const vdsVal = parseFloat(vdsMatch[1]);
                     const vdsKey = Math.round(vdsVal * 1000) / 1000;
-
-                    const meta = {
+                    analysisMap[vdsKey] = {
                         vt: vtMatch ? parseFloat(vtMatch[1]) : 0,
                         ss: ssMatch ? parseFloat(ssMatch[1]) : 0,
                         max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0
                     };
-
-                    if (tanVgsMatch && tanLogMatch) {
-                        meta.ssTangent = {
-                            x1: parseFloat(tanVgsMatch[1]),
-                            x2: parseFloat(tanVgsMatch[2]),
-                            y1: parseFloat(tanLogMatch[1]),
-                            y2: parseFloat(tanLogMatch[2])
-                        };
-                    }
-                    analysisMap[vdsKey] = meta;
                 }
-            } catch (e) {
-                console.warn("Metadata parse error:", line);
-            }
+            } catch(e) {}
         }
     }
 
-    // Fallback if no header found
-    if (dataStartIndex === -1) {
-        for (let i = 0; i < lines.length; i++) {
-            if (!lines[i].trim().startsWith('#') && lines[i].includes(',')) {
-                dataStartIndex = i;
-                break;
-            }
-        }
-    }
-    if (dataStartIndex === -1) dataStartIndex = 0;
-
+    // 2. Data Parsing
+    currentCSVData = [];
     const vdsSet = new Set();
     const vgsSet = new Set();
 
-    // 2. Data Parsing
-    // New format (v7.2.0+): timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids  (9 cols)
-    // v7.1.0 format:        timestamp,vd,vg,vd_read,vg_read,vsh,vds_true,vgs_true,ids              (9 cols)
-    // Legacy format:        timestamp,vds,vgs,vsh,ids,...                                           (7 cols)
     for (let i = dataStartIndex; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || line.startsWith('#')) continue;
         const parts = line.split(',');
         if (parts.length < 5) continue;
 
-        let vds, vgs, vsh, ids, gm, vd_read, vg_read, vds_true, vgs_true;
+        let vds, vgs, vsh, ids, gm=0, vd_read, vg_read, vds_true, vgs_true;
 
-        if (parts.length >= 9) {
-            // New format: timestamp,vds_sent,vgs_sent,vd_read,vg_read,vsh,vds_true,vgs_true,ids
-            vds = parseFloat(parts[1]);  // commanded vds target (differential setpoint)
-            vgs = parseFloat(parts[2]);  // commanded vgs target (differential setpoint)
-            vd_read = parseFloat(parts[3]);
-            vg_read = parseFloat(parts[4]);
-            vsh = parseFloat(parts[5]);
-            vds_true = parseFloat(parts[6]);
-            vgs_true = parseFloat(parts[7]);
-            ids = parseFloat(parts[8]);
-            gm = 0; // recalculated in calculateGmForData
-        } else {
-            // Legacy format: timestamp,vds,vgs,vsh,ids[,gm,...]
-            vds = parseFloat(parts[1]);
-            vgs = parseFloat(parts[2]);
-            vsh = parseFloat(parts[3]);
-            ids = parseFloat(parts[4]);
-            gm = (parts.length > 5) ? parseFloat(parts[5]) : 0;
-            vd_read = (parts.length > 6) ? parseFloat(parts[6]) : vds;
-            vg_read = (parts.length > 7) ? parseFloat(parts[7]) : vgs;
-            // No true voltages in legacy — fall back to commanded values
-            vds_true = vds;
-            vgs_true = vgs;
-        }
+        // Dynamic mapping based on detected indices
+        vds = parseFloat(parts[colMap.vds || colMap.vd || colMap.vds_sent || 1]);
+        vgs = parseFloat(parts[colMap.vgs || colMap.vg || colMap.vgs_sent || 2]);
+        vd_read = parseFloat(parts[colMap.vd_read || 3]);
+        vg_read = parseFloat(parts[colMap.vg_read || 4]);
+        vsh = parseFloat(parts[colMap.vsh || 5]);
+        vds_true = parseFloat(parts[colMap.vds_true || 6]);
+        vgs_true = parseFloat(parts[colMap.vgs_true || 7]);
+        ids = parseFloat(parts[colMap.ids || 8]);
+
+        // Specific override if vds_true/vgs_true are missing (7-col legacy)
+        if (isNaN(vds_true)) vds_true = vds;
+        if (isNaN(vgs_true)) vgs_true = vgs;
 
         // Legacy format fallback for Vt/SS (no longer stored per-row in new format)
         let vt = 0;

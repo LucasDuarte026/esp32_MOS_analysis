@@ -146,6 +146,14 @@ constexpr uint8_t  DAC_VDS_PIN    = 25;  // DAC Channel 1 — controls VDS (Drai
 constexpr uint8_t  DAC_VGS_PIN    = 26;  // DAC Channel 2 — controls VGS (Gate)
 constexpr uint8_t  ADC_SHUNT_PIN  = 34;  // ADC1_CH6       — reads shunt resistor voltage
 
+// Shunt Resistor Channel Mapping (ADS1115)
+constexpr uint8_t  ADC_SHUNT_NOM_CH    = 0;  // Direct shunt (low precision)
+constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // Amplified shunt (high precision via LT1013)
+
+// Amplified Shunt Gain Parameters
+constexpr float    SHUNT_AMP_GAIN      = 99.712871287f; // Precise calibration
+constexpr float    SHUNT_AMP_INV_GAIN  = 1.0f / SHUNT_AMP_GAIN;
+
 // Internal DAC (ESP32 — 8-bit, 0–3.3 V)
 constexpr uint8_t  DAC_RESOLUTION  = 8;
 constexpr uint16_t DAC_MAX_VALUE   = 255;
@@ -361,6 +369,12 @@ public:
     /** Current operating mode. */
     HardwareMode getMode() const { return currentMode_; }
 
+    /** 
+     * @brief Global I2C Mutex to prevent multi-core conflicts.
+     * Guaranteed to be initialized after begin().
+     */
+    static SemaphoreHandle_t getI2CMutex();
+
     /**
      * @brief Non-destructive I2C probe for external devices.
      *        Safe to call at any time; does NOT reinitialize anything.
@@ -384,6 +398,7 @@ public:
     
     /** Fast specialized reading methods for iterative calibration */
     float readShuntVoltageFast(uint8_t gainCode = 255); 
+    float readShuntVoltageAMPFast(uint8_t gainCode);
     float readVD_ActualFast(uint8_t gainCode = 255);
     float readVG_ActualFast(uint8_t gainCode = 255);
 
@@ -423,6 +438,7 @@ float readShuntVoltage(uint8_t gainCode = 255);
 float readVD_Actual(uint8_t gainCode = 255);
 float readVG_Actual(uint8_t gainCode = 255);
 float readShuntVoltageFast(uint8_t gainCode = 255);
+float readShuntVoltageAMPFast(uint8_t gainCode);
 float readVD_ActualFast(uint8_t gainCode = 255);
 float readVG_ActualFast(uint8_t gainCode = 255);
 void  setADC_Gain(uint8_t gainCode);
