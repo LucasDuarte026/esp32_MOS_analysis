@@ -176,30 +176,53 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   }
   config.ext_dac_vref = extDacVref;
 
-  // Hardware mode: true = external I2C (MCP4725 VGS + ADS1115), false = internal ESP32
+  // Hardware mode: external = dual MCP4725 (0x61 VDS, 0x60 VGS) + ADS1115; internal = dual ESP32 DAC + internal ADC
   bool useExternal = doc["use_external_hw"] | true;  // default: external
   config.use_external_hw = useExternal;
   hal::HardwareMode targetMode = useExternal ? hal::HardwareMode::HW_EXTERNAL : hal::HardwareMode::HW_INTERNAL;
+
+  // ── Hardware Pre-flight Check (Backend) ──────────────────────────────────
+  if (targetMode == hal::HardwareMode::HW_EXTERNAL) {
+    auto status = hal::HardwareHAL::checkExternalDevices();
+    if (!status.all_ok()) {
+      LOG_ERROR("Cannot start measurement: External hardware missing");
+      String err = "{\"error\":\"hardware_missing\",\"mcp4725_vds\":";
+      err += (status.mcp4725_vds ? "true" : "false");
+      err += ",\"mcp4725_vgs\":";
+      err += (status.mcp4725_vgs ? "true" : "false");
+      err += ",\"ads1115\":";
+      err += (status.ads1115 ? "true" : "false");
+      err += "}";
+      
+      AsyncWebServerResponse *response = request->beginResponse(424, "application/json", err);
+      addCORSHeaders(response);
+      request->send(response);
+      return;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   hal::HalConfig halCfg;
   halCfg.hardware_mode    = targetMode;
   halCfg.adc_oversampling = oversampling;
   halCfg.ext_dac_vref     = extDacVref;
-  halCfg.max_vgs          = useExternal ? extDacVref : 3.3f;
-  halCfg.max_vds          = 3.3f; // InternalDAC is always 3.3f
+  // Use the USB/External VDD as the software limit for both modes.
+  // Note: Internal ESP32 DACs will still physically clamp at 3.3V.
+  halCfg.max_vgs          = extDacVref;
+  halCfg.max_vds          = extDacVref;
   
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
 
-  // Apply VDD reference to ExternalDAC VGS
+  // Apply VDD reference to both MCP4725 (when present)
   {
-    auto* extDac = hal::HardwareHAL::instance().getExternalVGS();
-    if (extDac) {
-      extDac->setExtDacVref(extDacVref);
-    }
+    auto& hal = hal::HardwareHAL::instance();
+    if (auto* vdsDac = hal.getExternalVDS()) vdsDac->setExtDacVref(extDacVref);
+    if (auto* vgsDac = hal.getExternalVGS()) vgsDac->setExtDacVref(extDacVref);
   }
 
   // Note: PGA gains for ExternalADC are now applied dynamically during the sweep 
   // via mosfet_controller based on config.adc_gain_vsh, config.adc_gain_vd, and config.adc_gain_vg.
-  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + MCP4725 VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32)");
+  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32 dual DAC + ADC)");
   
   // Validate
   if (config.vgs_start < 0 || config.vgs_end > 5.0) {
@@ -312,10 +335,12 @@ void handleHwCheck(AsyncWebServerRequest *request)
   } else {
     auto s = hal::HardwareHAL::checkExternalDevices();
     json += "\"mode\":\"external\",";
+    json += "\"mcp4725_vds\":" + String(s.mcp4725_vds ? "true" : "false") + ",";
     json += "\"mcp4725_vgs\":" + String(s.mcp4725_vgs ? "true" : "false") + ",";
     json += "\"ads1115\":" + String(s.ads1115 ? "true" : "false") + ",";
     json += "\"all_ok\":" + String(s.all_ok() ? "true" : "false");
-    LOG_INFO("HW check: MCP4725_VGS=%s ADS1115=%s",
+    LOG_INFO("HW check: MCP4725_VDS=%s MCP4725_VGS=%s ADS1115=%s",
+             s.mcp4725_vds ? "OK" : "MISSING",
              s.mcp4725_vgs ? "OK" : "MISSING",
              s.ads1115     ? "OK" : "MISSING");
   }

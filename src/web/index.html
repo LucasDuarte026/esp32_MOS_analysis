@@ -112,8 +112,7 @@
                                     <h3 style="margin-bottom: var(--spacing-md);">Periféricos</h3>
                                     <div class="sweep-mode-toggle">
                                         <span class="mode-label mode-red mode-active" id="hw-ext-label">DAC e
-                                            ADC<br><small style="font-size:11px;font-weight:400;">Externos (MCP4725 +
-                                                ADS1115)</small></span>
+                                            ADC<br><small style="font-size:11px;font-weight:400;">2× MCP4725 (0x60 VGS, 0x61 VDS) + ADS1115</small></span>
                                         <label class="toggle-switch">
                                             <input type="checkbox" id="hw-mode-toggle">
                                             <span class="toggle-slider toggle-slider-red"></span>
@@ -225,11 +224,11 @@
 
                                         <!-- Tensão de Alimentação MCP4725 moved here -->
                                         <div id="ext-dac-vref-group" style="margin-top: 14px;">
-                                            <label for="ext-dac-vref">Tensão Alimentação MCP4725 (V)</label>
+                                            <label for="ext-dac-vref">Alimentação de entrada do USB</label>
                                             <input type="number" id="ext-dac-vref" class="input-field"
                                                 min="4.0" max="5.5" step="0.1" value="5.0">
                                             <small class="helper-text" id="ext-dac-vref-hint">
-                                                Tensão VDD do DAC. Faixa: 4.0 – 5.5V
+                                                Tensão de alimentação dos componentes (típico: 5.0V da porta USB)
                                             </small>
                                         </div>
                                     </div>

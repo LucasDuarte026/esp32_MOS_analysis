@@ -486,44 +486,35 @@ void HardwareHAL::switchMode(HardwareMode mode, const HalConfig& config) {
 }
 
 void HardwareHAL::initInternal(const HalConfig& config) {
-    LOG_WARN("--- HARDWARE DEVICE SELECTION (INTERNAL MODE) ---");
-    LOG_WARN("PROVISIONAL OVERRIDE: Forcing InternalDAC for VDS (Drain).");
-    // VDS DAC — InternalDAC channel 1 (GPIO25)
+    LOG_INFO("--- HARDWARE DEVICE SELECTION (INTERNAL MODE: dual ESP32 DAC + internal ADC) ---");
+    // VDS — InternalDAC channel 1 (GPIO25)
     auto vds = std::unique_ptr<InternalDAC>(new InternalDAC(1, config.max_vds));
     vds->begin();
     dacVDS_ = std::move(vds);
 
-    LOG_WARN("PROVISIONAL OVERRIDE: Forcing ExternalDAC (MCP4725) for VGS (Gate) even in INTERNAL mode.");
-    // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
-    auto vgs = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VGS_ADDR, config.max_vgs));
-    if (!vgs->begin()) {
-        LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
-        auto vgs_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
-        vgs_fallback->begin();
-        dacVGS_ = std::move(vgs_fallback);
-    } else {
-        dacVGS_ = std::move(vgs);
-    }
+    // VGS — InternalDAC channel 2 (GPIO26)
+    auto vgs = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
+    vgs->begin();
+    dacVGS_ = std::move(vgs);
 
-    LOG_INFO("Using InternalADC for Shunt (Current limits).");
-    // Shunt ADC — InternalADC (GPIO34)
+    LOG_INFO("Using InternalADC for Shunt.");
     auto adc = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
     adc->begin();
     adcShunt_ = std::move(adc);
     shunt_adc_external_ = false;
 
-    LOG_INFO("  [INTERNAL] VDS: InternalDAC GPIO%d (8-bit, %.1f mV/step) [PROVISIONAL]",
+    LOG_INFO("  [INTERNAL] VDS: InternalDAC GPIO%d (8-bit, %.1f mV/step)",
              DAC_VDS_PIN, dacVDS_->getResolution() * 1000.0f);
-    LOG_INFO("  [INTERNAL] VGS: ExternalDAC  MCP4725 0x%02X (12-bit, %.3f mV/step) [PROVISIONAL]",
-             EXT_DAC_VGS_ADDR, dacVGS_->getResolution() * 1000.0f);
+    LOG_INFO("  [INTERNAL] VGS: InternalDAC GPIO%d (8-bit, %.1f mV/step)",
+             DAC_VGS_PIN, dacVGS_->getResolution() * 1000.0f);
     LOG_INFO("  [INTERNAL] ADC: InternalADC  GPIO%d (12-bit, %d samples)",
              config.adc_shunt_pin, config.adc_oversampling);
 }
 
 void HardwareHAL::initExternal(const HalConfig& config) {
-    LOG_WARN("--- HARDWARE DEVICE SELECTION (EXTERNAL MODE) ---");
-    
-    // VDS DAC — ExternalDAC MCP4725 (I2C 0x61, ADDR→VCC) — NEW in v8.0.5
+    LOG_INFO("--- HARDWARE DEVICE SELECTION (EXTERNAL MODE: dual MCP4725 + ADS1115) ---");
+
+    // VDS — MCP4725 @ 0x61
     auto vds = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VDS_ADDR, config.max_vds));
     if (!vds->begin()) {
         LOG_ERROR("ExternalDAC (MCP4725 VDS 0x61) init failed — falling back to InternalDAC for VDS");
@@ -534,11 +525,10 @@ void HardwareHAL::initExternal(const HalConfig& config) {
         dacVDS_ = std::move(vds);
     }
 
-    LOG_WARN("Using ExternalDAC (MCP4725) for VGS (Gate) as requested by external mode.");
-    // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
+    // VGS — MCP4725 @ 0x60
     auto vgs = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VGS_ADDR, config.max_vgs));
     if (!vgs->begin()) {
-        LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
+        LOG_ERROR("ExternalDAC (MCP4725 VGS 0x60) init failed — falling back to InternalDAC for VGS");
         auto vgs_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
         vgs_fallback->begin();
         dacVGS_ = std::move(vgs_fallback);
@@ -560,10 +550,8 @@ void HardwareHAL::initExternal(const HalConfig& config) {
         shunt_adc_external_ = true;
     }
 
-    LOG_INFO("  [EXTERNAL] VDS: InternalDAC  GPIO%d (8-bit, %.1f mV/step) [PROVISIONAL]",
-             DAC_VDS_PIN, dacVDS_->getResolution() * 1000.0f);
-    LOG_INFO("  [EXTERNAL] VGS: ExternalDAC  MCP4725 0x%02X (12-bit, %.3f mV/step)",
-             EXT_DAC_VGS_ADDR, dacVGS_->getResolution() * 1000.0f);
+    LOG_INFO("  [EXTERNAL] VDS: %s", dacVDS_->getName());
+    LOG_INFO("  [EXTERNAL] VGS: %s", dacVGS_->getName());
     LOG_INFO("  [EXTERNAL] ADC: ExternalADC  ADS1115 0x%02X (16-bit, %d samples, ~%.1f ENOB)",
              EXT_ADC_ADDR, config.adc_oversampling, adcShunt_->getEffectiveBits());
 }
@@ -593,11 +581,12 @@ HardwareHAL::ExternalDeviceStatus HardwareHAL::checkExternalDevices() {
     ExternalDeviceStatus status;
     
     if (xSemaphoreTake(getI2CMutex(), pdMS_TO_TICKS(200)) == pdTRUE) {
+        status.mcp4725_vds = probeI2CDevice(EXT_DAC_VDS_ADDR);  // 0x61
         status.mcp4725_vgs = probeI2CDevice(EXT_DAC_VGS_ADDR);  // 0x60
-        status.ads1115     = probeI2CDevice(EXT_ADC_ADDR);       // 0x48
+        status.ads1115     = probeI2CDevice(EXT_ADC_ADDR);     // 0x48
         xSemaphoreGive(getI2CMutex());
     } else {
-        // Bridge busy
+        status.mcp4725_vds = false;
         status.mcp4725_vgs = false;
         status.ads1115 = false;
     }
@@ -690,13 +679,15 @@ float HardwareHAL::readVG_ActualFast(uint8_t gainCode) {
     return adcShunt_->readVoltageFast(2, gainCode);
 }
 
+ExternalDAC* HardwareHAL::getExternalVDS() {
+    if (currentMode_ != HardwareMode::HW_EXTERNAL || !dacVDS_) return nullptr;
+    if (dacVDS_->getBits() == EXT_DAC_BITS) return static_cast<ExternalDAC*>(dacVDS_.get());
+    return nullptr;
+}
+
 ExternalDAC* HardwareHAL::getExternalVGS() {
-    // Dynamic cast not available with -fno-rtti; use a flag instead.
-    if (currentMode_ == HardwareMode::HW_EXTERNAL ||
-        currentMode_ == HardwareMode::HW_INTERNAL) {
-        // dacVGS_ is an ExternalDAC in both modes (due to PROVISIONAL override)
-        return static_cast<ExternalDAC*>(dacVGS_.get());
-    }
+    if (currentMode_ != HardwareMode::HW_EXTERNAL || !dacVGS_) return nullptr;
+    if (dacVGS_->getBits() == EXT_DAC_BITS) return static_cast<ExternalDAC*>(dacVGS_.get());
     return nullptr;
 }
 

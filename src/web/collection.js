@@ -200,6 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!hwCheck.all_ok) {
                     const missing = [];
+                    if (hwCheck.mcp4725_vds === false) missing.push('MCP4725 (DAC VDS — I²C 0x61)');
                     if (hwCheck.mcp4725_vgs === false) missing.push('MCP4725 (DAC VGS — I²C 0x60)');
                     if (hwCheck.ads1115 === false) missing.push('ADS1115 (ADC — I²C 0x48)');
 

@@ -219,9 +219,9 @@ constexpr int16_t  EXT_ADC_MAX_RAW = 32767;   // Positive full-scale
 // ============================================================================
 // InternalDAC — ESP32 built-in 8-bit DAC
 // ============================================================================
-// Two independent channels:
-//   channel 1 → GPIO25 → VDS (Drain voltage)   [both HW_INTERNAL and HW_EXTERNAL]
-//   channel 2 → GPIO26 → VGS (Gate voltage)    [HW_INTERNAL only; replaced by MCP4725 in HW_EXTERNAL]
+// Two independent channels (HW_INTERNAL only):
+//   channel 1 → GPIO25 → VDS   |   channel 2 → GPIO26 → VGS
+// HW_EXTERNAL: MCP4725 @ 0x61 (VDS) + MCP4725 @ 0x60 (VGS)
 class InternalDAC : public IVoltageSource {
 public:
     explicit InternalDAC(uint8_t channel, float maxVoltage = 3.3f);
@@ -414,16 +414,19 @@ public:
      *        Safe to call at any time; does NOT reinitialize anything.
      */
     struct ExternalDeviceStatus {
-        bool mcp4725_vgs = false;  ///< DAC VGS  @ 0x60 (ADDR→GND)
-        bool ads1115      = false;  ///< Shunt ADC @ 0x48
-        bool all_ok() const { return mcp4725_vgs && ads1115; }
+        bool mcp4725_vds = false;  ///< DAC VDS @ 0x61
+        bool mcp4725_vgs = false;  ///< DAC VGS @ 0x60
+        bool ads1115     = false;  ///< Shunt ADC @ 0x48
+        bool all_ok() const { return mcp4725_vds && mcp4725_vgs && ads1115; }
     };
     static ExternalDeviceStatus checkExternalDevices();
 
     IVoltageSource&  getVDS()      { return *dacVDS_; }
     IVoltageSource&  getVGS()      { return *dacVGS_; }
     ICurrentSensor&  getShuntADC() { return *adcShunt_; }
-    ExternalDAC*     getExternalVGS();  // returns nullptr if not ExternalDAC
+    /** Non-null only in HW_EXTERNAL when that rail uses MCP4725 (not InternalDAC fallback). */
+    ExternalDAC*     getExternalVDS();
+    ExternalDAC*     getExternalVGS();
     
     /** Specialized reading methods assuming external ADC mapped to A0/A1/A2 */
     float readShuntVoltage(uint8_t gainCode = 255); 
