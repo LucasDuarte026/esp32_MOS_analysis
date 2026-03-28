@@ -557,16 +557,15 @@ void MOSFETController::performSweep()
                 // Read amplified shunt (A3) for the new column and canonical calculations
                 float vsh_precise = hal::readShuntVoltageAMPFast(config_.adc_gain_vsh);
 
-                // Use the best available shunt for canonical IDs/TrueVoltages
-                float vsh = (vsh_precise < 0.032f) ? vsh_precise : vsh_lowres;
-
+                // User requested: no logic, just use precise for calculations and graph
+                float vsh       = vsh_precise; 
                 float vds_true  = vd_actual - vsh;
                 float vgs_true  = vg_actual - vsh;
                 float ids       = vsh / rshunt;
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, vsh, vsh_precise,
+                           vd_actual, vg_actual, vsh_lowres, vsh_precise,
                            vds_true, vgs_true, ids);
 
                 rowCount++;

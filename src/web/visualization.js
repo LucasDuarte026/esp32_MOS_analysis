@@ -533,8 +533,15 @@ function updatePlotsMultiCurve() {
         x: xData,
         y: plotData.map(d => Math.abs(d.ids)),
         mode: 'lines',
-        name: 'Ids (A)',
+        name: 'Ids (A) [Lupa/Precise]',
         line: { color: colors.ids, width: 2 }
+    }, {
+        x: xData,
+        y: plotData.map(d => Math.abs(d.vsh / rShuntValue)), // d.vsh is the low-res (Idx 5)
+        mode: 'lines',
+        name: 'Ids (A) [Bruto/LowRes]',
+        visible: 'legendonly', // Hidden by default
+        line: { color: '#9e9e9e', width: 1, dash: 'dash' }
     }];
 
     // 2. Gm trace — only in VGS mode (transfer curves)
@@ -597,7 +604,7 @@ function updatePlotsMultiCurve() {
         title: plotTitle,
         xaxis: { title: xAxisTitle },
         yaxis: {
-            title: 'Ids (A)',
+            title: 'Ids (Precise) [A]',
             titlefont: { color: '#2196F3' },
             tickfont: { color: '#2196F3' },
             type: isVDSMode ? 'linear' : scaleType,  // IdVd always linear
