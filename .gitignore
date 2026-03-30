@@ -2,7 +2,7 @@
 .vscode
 .venv
 KNOWN_ISSUES.md
-desejos futuros.txt
+desejos futuros.md
 platformio_override.ini
 wifi_credentials_local.h
 include/secrets.h

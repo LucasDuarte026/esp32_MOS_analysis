@@ -151,19 +151,19 @@ constexpr uint8_t  ADC_SHUNT_NOM_CH    = 0;  // Direct shunt (low precision)
 constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // Amplified shunt (high precision via LT1013)
 
 // Amplified Shunt Gain Parameters (A3: vsh_precise = f(raw_a3_volts))
-constexpr float    SHUNT_AMP_GAIN      = 31.303951368f;
 constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.303951368f;
 
 /**
- * DC offset (V) subtracted from (raw_a3 * SHUNT_AMP_GAIN_INV): LM358 / ground-bounce vs shunt GND.
+ * DC offset (V) subtracted from (raw_a3 * SHUNT_AMP_GAIN_INV): LT1013 / ground-bounce vs shunt GND.
  * Set to 0.f to disable. Tune from CSV (vsh_precise vs vsh in linear region).
+ * Ref: LT1013 has typical offset of 150 uV.
  */
-constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.072f;
+constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.00015f; 
 
 /** If A3 ADC voltage (before gain) is >= this, use A0 direct shunt for Ids (amplifier saturation). */
-constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 3.0f;
+constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 5.0f;
 
-/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LM358 gain, then − offset. */
+/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LT1013 gain, then − offset. */
 inline float shuntAmplifiedAdcToVoltage(float raw_a3_volts) {
     float v = raw_a3_volts * SHUNT_AMP_GAIN_INV;
     if (v > SHUNT_AMP_A3_OFFSET_V) {

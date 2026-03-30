@@ -26,8 +26,11 @@
 // ============================================================================
 /// Maximum allowed VDS read-back error (|VD_read - VSH - target_vds|) before
 /// entering the correction loop [V].
-#define VDS_GLOBAL_ERROR   0.010f
-#define VGS_GLOBAL_ERROR   0.050f
+/// Set to 2 mV — consistent with MCP4725 resolution (1.22 mV/step) and LT1013 offset (~150 uV).
+#define VDS_GLOBAL_ERROR   0.002f
+/// Maximum allowed VGS read-back error. Kept at 2mV — dominated by source
+/// degeneration that varies with Ids, not by DAC/amp resolution.
+#define VGS_GLOBAL_ERROR   0.002f
 /// Maximum correction iterations before giving up and keeping best estimate
 #define DAC_CALIB_MAX_ITER 10
 

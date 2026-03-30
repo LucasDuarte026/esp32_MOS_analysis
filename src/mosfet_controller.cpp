@@ -489,8 +489,8 @@ void MOSFETController::performSweep()
     currentFile_.write((uint8_t*)lineBuf, len);
 
     len = snprintf(lineBuf, sizeof(lineBuf),
-                    "# Shunt: LM358_gain=%.9f | A3_DC_offset=%.4fV (sw) | Ids: A3 corrected if A3<%.1fV else A0 | PGA: %s\n",
-                    hal::SHUNT_AMP_GAIN, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
+                    "# Shunt: LT1013_gain=%.9f | A3_DC_offset=%.6fV (sw) | Ids: A3 corrected if A3<%.1fV else A0 | PGA: %s\n",
+                    1.0f / hal::SHUNT_AMP_GAIN_INV, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
                     (config_.adc_gain_vsh == hal::ADC_GAIN_AUTO) ? "AUTO (oversampled primed by fast)" : "fixed");
     currentFile_.write((uint8_t*)lineBuf, len);
     
