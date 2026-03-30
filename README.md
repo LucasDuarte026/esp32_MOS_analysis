@@ -1,196 +1,149 @@
-# ESP32 MOSFET Analysis Dashboard
+# ESP32 MOSFET Analysis Platform
 
-## 🎯 Propósito
-
-**Projeto principal** de análise MOSFET com dashboard web completo e interface profissional.
-
-## 📋 O que faz
-
-- **Controle de varredura Vgs** (tensão gate-source)
-- **Aquisição de dados Ids** (corrente drain-source)
-- **Dashboard web interativo** com 3 abas:
-  - **Coleta de Dados:** Configuração e início de medições
-  - **Visualização:** Gráficos interativos (Ids, Gm, SS, Vt)
-  - **Email:** Envio de relatórios
-- **API REST** para comunicação com scripts Python
-- **Armazenamento de medições** no LittleFS
-
-## 🔧 Hardware
-
-### Pinos ESP32:
-
-- **DAC (GPIO 25):** Controle de tensão Vgs
-- **ADC (GPIO 34):** Leitura de corrente Ids
-- **LED (GPIO 2):** Indicador de status
-
-### Circuito Externo:
-
-- Fonte de alimentação controlada
-- Circuito de medição MOSFET
-- Conversão I-V para leitura ADC
-
-## 🚀 Como Usar
-
-### 1. Configurar WiFi
-
-1. Copie o arquivo de exemplo:
-   ```bash
-   cp include/secrets.h.example include/secrets.h
-   ```
-
-2. Edite `include/secrets.h` com suas credenciais:
-   ```cpp
-   #define WIFI_SSID "SUA_REDE"
-   #define WIFI_PASSWORD "SUA_SENHA"
-   ```
-
-> ⚠️ **Privacidade:** O arquivo `secrets.h` já está no `.gitignore` e não será enviado para o repositório. Use-o para suas senhas locais.
-
-### 2. Compilar e Fazer Upload
-
-```bash
-cd esp32_mosfet_analysis
-pio run -t upload
-pio device monitor
-```
-
-### 3. Acessar Dashboard
-
-Após conectar ao WiFi, acesse: `http://IP_DO_ESP32/` ou `http://esp32-mosfet.local/`
-
-## 📊 Dashboard Interface
-
-### Aba 1: Coleta de Dados
-
-- Configurar parâmetros de medição:
-  - Vgs inicial/final
-  - Passo de tensão
-  - Tempo de estabilização
-  - Resistor shunt
-- Iniciar/parar coleta
-- Monitor de progresso em tempo real
-
-### Aba 2: Visualização de Dados
-
-- Gráficos interativos (Plotly.js)
-- Toggles para curvas:
-  - Ids (corrente)
-  - Gm (transcondutância)
-  - SS (subthreshold swing)
-  - Segunda derivada
-  - Vt (tensão de limiar)
-- Métricas calculadas
-
-### Aba 3: Envio de Dados
-
-- Compor e enviar relatórios por email
-- Anexar dados (CSV, JSON, PDF)
-- Incluir gráficos
-
-## 🔍 API REST
-
-### GET `/api/status`
-
-Status do sistema:
-
-```json
-{
-  "status": "ready",
-  "device": "ESP32-MOSFET"
-}
-```
-
-### POST `/api/start`
-
-Iniciar medição:
-
-```json
-{
-  "vgs_start": 0.0,
-  "vgs_end": 3.5,
-  "vgs_step": 0.05,
-  "rshunt": 100,
-  "settling_ms": 5,
-  "filename": "mosfet_data"
-}
-```
-
-### GET `/api/data`
-
-Obter dados de medição:
-
-```json
-{
-  "data": [
-    {"timestamp": 1234, "vgs": 0.0, "vsh": 0.001},
-    {"timestamp": 1239, "vgs": 0.05, "vsh": 0.002}
-  ],
-  "count": 71
-}
-```
-
-### GET `/api/files`
-
-Listar medições salvas no ESP32.
-
-### GET `/api/files/download?file=nome.csv`
-
-Baixar arquivo de medição específico.
-
-## 📁 Estrutura
-
-```
-esp32_mosfet_analysis/
-├── src/
-│   ├── main.cpp               # Código principal + handlers HTTP
-│   ├── mosfet_controller.cpp  # Controlador MOSFET
-│   ├── file_manager.cpp       # Gerenciador de arquivos
-│   ├── monitoring_task.cpp    # Monitoramento do sistema
-│   ├── log_buffer.cpp         # Buffer de logs
-│   ├── web_ui.cpp             # Interface web
-│   └── web/
-│       ├── dashboard.html     # Dashboard HTML
-│       ├── dashboard.css      # Estilos
-│       └── dashboard.js       # JavaScript
-├── include/
-│   ├── mosfet_controller.h
-│   ├── file_manager.h
-│   ├── monitoring_task.h
-│   ├── log_buffer.h
-│   ├── web_ui.h
-│   └── wifi_credentials.h     # Configuração WiFi (via build flags)
-├── scripts/
-│   └── embed_web.py           # Script para embeber HTML
-└── platformio.ini             # Configuração PlatformIO
-```
-
-## 🔗 Integração com Python
-
-Este projeto trabalha em conjunto com scripts Python em `../analysis/`:
-
-- **Comunicação serial** para controle direto
-- **API HTTP** para acesso remoto
-- **Processamento offline** de dados coletados
-
-## 🚧 Status de Desenvolvimento
-
-**⚠️ Em Desenvolvimento**
-
-Funcionalidades implementadas:
-- ✅ Servidor web com dashboard interativo
-- ✅ API REST completa
-- ✅ Armazenamento de medições (LittleFS)
-- ✅ Sistema de logs em tempo real
-- ✅ Monitoramento de temperatura e memória
-- ✅ Validação de segurança (path traversal, XSS, CORS)
-- ✅ Classe MOSFETController com varredura VGS
-
-Próximos passos:
-- [ ] Implementar controle DAC para Vgs
-- [ ] Implementar leitura ADC calibrada para Ids
-- [ ] Calcular Gm, Vt, SS automaticamente
-- [ ] Integrar gráficos Plotly no dashboard
+> Plataforma embarcada de caracterização de MOSFETs com servidor web autossuficiente, controle em malha fechada e extração automática de parâmetros elétricos.
+>
+> **Firmware:** v10.0.0 · **Target:** ESP32 Wroom 32D · **Interface:** Browser (zero instalação)
 
 ---
 
-**Status:** 🚧 Projeto Principal (Em Desenvolvimento)
+## O que é
+
+Um instrumento de bancada baseado em ESP32 que extrai curvas I×V e parâmetros elétricos de MOSFETs — Vth, Gm e Subthreshold Swing — diretamente no dispositivo, sem nenhum software instalado no computador. A interface é uma página web hospedada no próprio ESP32, acessível por qualquer navegador na rede local.
+
+O projeto foi desenvolvido como pesquisa científica (PIBIC, EESC-USP) para demonstrar que é possível obter caracterização metrológica com hardware de ~R$ 200, desde que as limitações sejam compensadas por firmware cuidadoso.
+
+---
+
+## Modos de Operação
+
+| Modo | Sweep | VDS/VGS Fixo | Shunt | Parâmetro Extraído |
+|---|---|---|---|---|
+| **1 — Subthreshold** | VGS: 0 → 3,5 V | VDS fixo (0,1 V) | 100 Ω | Subthreshold Swing (SS) |
+| **2 — Saturação** | VGS: 0 → 5 V | VDS fixo | 1 Ω | Vth, Gm máx |
+| **3 — Curva de Saída** | VDS: 0 → 5 V | VGS fixo (família) | 1 Ω | Curva Ids×Vds, região triodo/saturação |
+
+---
+
+## Hardware
+
+```
+ESP32 Wroom 32D  ─── I²C (400 kHz) ───  MCP4725 @ 0x60   (DAC 12-bit, VGS)
+                                    ───  MCP4725 @ 0x61   (DAC 12-bit, VDS → buffer LT1013)
+                                    ───  ADS1115 @ 0x48   (ADC 16-bit, 4 canais)
+
+ADS1115 canais:
+  A0 ← Shunt direto        (backup / alta corrente)
+  A1 ← VD via resistor     (realimentação VDS)
+  A2 ← VG via resistor     (realimentação VGS)
+  A3 ← Shunt × 31,3 (LT1013)  (precisão em baixas correntes)
+
+GPIO14 ── 2N3904 ── GND    (bleeder ativo: descarrega nó de dreno entre medições)
+GPIO12 ── jumper GND       (ativa modo debug completo sem recompilação)
+```
+
+**Resolução:**
+- DAC: 1,22 mV/passo (MCP4725, Vref = 5 V)
+- ADC canal A3: ~7,8 µV/bit efetivo (ADS1115 ganho 16×, oversampling 64×, ENOB ≈ 19 bits)
+- Corrente mínima detectável: ordem de nA (canal amplificado A3)
+- Faixa operacional validada: 100 mA nominal, proteção automática em 500 mA
+
+---
+
+## Firmware — Decisões Técnicas Relevantes
+
+**Controle em malha fechada:** Cada ponto de medição é calibrado iterativamente. O firmware aplica VGS/VDS alvo, lê os valores reais (A1, A2), calcula o erro e corrige o DAC até |erro| < 2 mV ou 10 iterações. Isso compensa a degeneração de source (queda no shunt) em tempo real.
+
+**Dual shunt com auto-range:** O canal A3 (amplificado ×31,3 via LT1013) é usado como primário. Quando a tensão bruta em A3 ≥ 5,0 V (saturação do amplificador), o sistema troca automaticamente para A0. A transição é transparente na curva gerada.
+
+**Oversampling + Trimmed Mean:** Cada leitura final coleta N amostras (até 64×), ordena por Insertion Sort (stack-only, sem heap), descarta os 10% extremos e retorna a média dos 80% centrais. Elimina spikes de I²C e interferência do Wi-Fi do Core 0.
+
+**Multi-core + mutex I²C:** O servidor HTTP roda no Core 0; a tarefa de medição, no Core 1. Um semáforo protege todas as transações I²C. Requests HTTP são respondidos em < 50 ms durante varreduras ativas.
+
+**Streaming direto para FAT:** Cada ponto é escrito no CSV em FFat imediatamente após a leitura, sem acumular em RAM. Flush a cada 50 linhas. O ESP32 tem 520 KB de RAM — essa decisão torna o tamanho da varredura ilimitado pela memória.
+
+**UI embarcada em PROGMEM:** O HTML/CSS/JS é compilado pelo pre-build hook `scripts/embed_web.py` e servido via arrays PROGMEM. A partição FFat é usada exclusivamente para os CSVs de medição.
+
+---
+
+## Interface Web
+
+**`/` — Coleta:** Configuração de parâmetros, verificação de hardware (probe I²C visual com ✅/❌ por componente), progresso em tempo real com valor de VGS/VDS atual.
+
+**`/visualization` — Análise:** Seleção de CSV armazenado, gráfico interativo (Plotly.js) com Ids em log, Gm, reta tangente do SS e marcador de Vth. Parâmetros exibidos no painel lateral.
+
+**`/email` — Exportação:** Envio de CSVs por SMTP diretamente do ESP32, sem passar pelo computador.
+
+Acesso via mDNS: `http://mosfet.local/`
+
+---
+
+## Formato CSV de Saída
+
+```
+# MOSFET Characterization Data
+# Firmware: 10.0.0 | HW: Fully External | Rshunt: 100 Ohms
+# Shunt: LT1013_gain=31.303951368 | A3_DC_offset=0.000150V | Switch threshold=5.0V
+#
+timestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids
+...
+# VDS=0.100V: Vt=1.523V, SS=87.45 mV/dec, MaxGm=2.34e-03 S
+```
+
+`vds_true` e `vgs_true` são as tensões reais nos terminais do MOSFET (com subtração da queda no shunt). O CSV contém os metadados completos de cada medição para rastreabilidade.
+
+---
+
+## Como Usar
+
+```bash
+# 1. Credenciais Wi-Fi
+cp include/secrets.h.example include/secrets.h
+# editar WIFI_SSID e WIFI_PASSWORD
+
+# 2. Build e upload
+pio run -t upload
+
+# 3. Acesso
+# http://mosfet.local/  (mesma rede Wi-Fi)
+```
+
+**Dependências de hardware mínimas:** ESP32 DevKit, 2× MCP4725, ADS1115, LT1013 (×2), 2N3904, shunt 100 Ω e 1 Ω.
+
+Se algum periférico I²C estiver ausente, o firmware detecta na inicialização e exibe um modal descritivo antes de permitir o início da medição.
+
+---
+
+## Estrutura do Repositório
+
+```
+├── src/
+│   ├── main.cpp                # Inicialização, servidor HTTP, handlers REST
+│   ├── mosfet_controller.cpp   # Máquina de estados, sweep, calibração
+│   ├── hardware_hal.cpp        # HAL: DAC/ADC interno e externo
+│   └── ...
+├── include/
+│   ├── hardware_hal.h          # Constantes de hardware, inline shuntAmplifiedAdcToVoltage()
+│   ├── mosfet_controller.h     # Configuração de sweep, erros globais, limites
+│   └── version.h               # SOFTWARE_VERSION
+├── scripts/
+│   └── embed_web.py            # Pre-build: HTML/CSS/JS → PROGMEM arrays
+├── web/                        # Fonte da UI (collection.js, visualization.js, ...)
+├── documentation_master.md     # Documentação técnica completa (hardware, firmware, algoritmos)
+└── platformio.ini
+```
+
+---
+
+## Dispositivos Testados
+
+CD4007 (CMOS gate), 2N7000 (switching), BS170 (AF/RF). Os três operam na faixa de 0–5 V da plataforma e têm perfis elétricos distintos (Vth, SS, Gm), servindo como conjunto de validação cruzada.
+
+---
+
+## Documentação Técnica
+
+O arquivo [`documentation_master.md`](./documentation_master.md) contém a especificação completa: decisões de hardware com justificativas quantitativas, fluxogramas de firmware, algoritmos de cálculo (SS, Vth, Gm), formato do CSV e análise comparativa com o SMU Keysight B2902C.
+
+---
+
+**Projeto PIBIC — EESC-USP · Lucas Sales Duarte · Orientadora: Profa. Vanessa Cristina Pereira da Silva Venuto**
