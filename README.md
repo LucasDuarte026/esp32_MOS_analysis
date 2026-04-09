@@ -98,7 +98,7 @@ Acesso via mDNS: `http://mosfet.local/`
 #
 timestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids
 ...
-# VDS=0.100V: Vt=1.523V, SS=87.45 mV/dec, MaxGm=2.34e-03 S
+# VDS=0.100V: Vt_Gm=1.523V, Vt_SS=1.490V, SS=87.45 mV/dec, MaxGm=2.34e-03 S
 ```
 
 `vds_true` e `vgs_true` são as tensões reais nos terminais do MOSFET (com subtração da queda no shunt). O CSV contém os metadados completos de cada medição para rastreabilidade.

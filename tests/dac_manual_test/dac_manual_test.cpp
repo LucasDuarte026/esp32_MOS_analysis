@@ -2,27 +2,32 @@
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
 #include <Adafruit_ADS1X15.h>
-#include <driver/dac.h>
 
 // Configurações de Hardware
-#define INTERNAL_DAC_CH DAC_CHANNEL_1 // GPIO 25
-#define MCP4725_ADDR 0x60
-#define ADS1115_ADDR 0x48
+#define MCP4725_VG_ADDR 0x60 // Gate Voltage (VGS) - ADDR pin -> GND
+#define MCP4725_VD_ADDR 0x61 // Drain Voltage (VDS) - ADDR pin -> VCC
+#define ADS1115_ADDR    0x48
 
-// Referências de Tensão (Ajuste se necessário)
-#define VREF_INTERNAL 3.3
-#define VREF_EXTERNAL 5.0 // Voltagem de alimentação do MCP4725
+// Referências de Tensão
+#define VREF_EXTERNAL 5.0 // Voltagem de alimentação dos MCP4725 (VDD)
 
-Adafruit_MCP4725 mcp;
+Adafruit_MCP4725 mcpVG; // Gate
+Adafruit_MCP4725 mcpVD; // Drain
 Adafruit_ADS1115 ads;
 
 void setup() {
     Serial.begin(115200);
     Wire.begin();
 
-    // Inicializa MCP4725
-    if (!mcp.begin(MCP4725_ADDR)) {
-        Serial.println("\n[ERRO] MCP4725 não encontrado no endereço 0x60!");
+    // Inicializa MCP4725 VG (0x60)
+    if (!mcpVG.begin(MCP4725_VG_ADDR)) {
+        Serial.println("\n[ERRO] MCP4725 VG não encontrado no endereço 0x60!");
+        while(1) delay(10);
+    }
+
+    // Inicializa MCP4725 VD (0x61)
+    if (!mcpVD.begin(MCP4725_VD_ADDR)) {
+        Serial.println("\n[ERRO] MCP4725 VD não encontrado no endereço 0x61!");
         while(1) delay(10);
     }
 
@@ -33,16 +38,12 @@ void setup() {
         while(1) delay(10);
     }
 
-    // Inicializa DAC Interno
-    dac_output_enable(INTERNAL_DAC_CH);
-    dac_output_voltage(INTERNAL_DAC_CH, 0);
-
     Serial.println("\n╔══════════════════════════════════╗");
     Serial.println("║      Teste Manual de DACs        ║");
-    Serial.println("║  Interno: GPIO25 (8-bit) -> A1   ║");
-    Serial.println("║  Externo: MCP4725 (12-bit) -> A2 ║");
+    Serial.println("║  VG: MCP4725 (0x60) -> ADS A2    ║");
+    Serial.println("║  VD: MCP4725 (0x61) -> ADS A1    ║");
     Serial.println("╚══════════════════════════════════╝");
-    Serial.println("\nInstruções: Digite os dois valores separados por espaço (ex: 1.0 2.25) e aperte ENTER.");
+    Serial.println("\nInstruções: Digite as tensões VG e VD separadas por espaço (ex: 1.5 3.3) e aperte ENTER.");
 }
 
 String inputBuffer = "";
@@ -59,7 +60,7 @@ float getAVGRading(int channel) {
 
 void loop() {
     if (showPrompt) {
-        Serial.print("\nDigite as tensões [Interno Externo] (Ex: 1.2 2.5): ");
+        Serial.print("\nDigite as tensões [VG VD] (Ex: 1.5 3.3): ");
         showPrompt = false;
     }
 
@@ -70,32 +71,33 @@ void loop() {
             if (inputBuffer.length() > 0) {
                 Serial.println();
                 
-                float voltInt = 0, voltExt = 0;
-                int readCount = sscanf(inputBuffer.c_str(), "%f %f", &voltInt, &voltExt);
+                float voltVG = 0, voltVD = 0;
+                int readCount = sscanf(inputBuffer.c_str(), "%f %f", &voltVG, &voltVD);
 
                 if (readCount >= 2) {
-                    Serial.printf("  > Setpoint: Interno=%.3fV, Externo=%.3fV\n", voltInt, voltExt);
+                    Serial.printf("  > Setpoint: VG=%.3fV, VD=%.3fV\n", voltVG, voltVD);
 
-                    // --- DAC Interno (8-bit) ---
-                    int valInt = (int)((voltInt / VREF_INTERNAL) * 255);
-                    valInt = constrain(valInt, 0, 255);
-                    dac_output_voltage(INTERNAL_DAC_CH, (uint8_t)valInt);
+                    // --- DAC Gate (VG - 0x60) ---
+                    int valVG = (int)((voltVG / VREF_EXTERNAL) * 4095);
+                    valVG = constrain(valVG, 0, 4095);
+                    mcpVG.setVoltage((uint16_t)valVG, false);
 
-                    // --- DAC Externo (12-bit) ---
-                    int valExt = (int)((voltExt / VREF_EXTERNAL) * 4095);
-                    valExt = constrain(valExt, 0, 4095);
-                    mcp.setVoltage((uint16_t)valExt, false);
+                    // --- DAC Drain (VD - 0x61) ---
+                    int valVD = (int)((voltVD / VREF_EXTERNAL) * 4095);
+                    valVD = constrain(valVD, 0, 4095);
+                    mcpVD.setVoltage((uint16_t)valVD, false);
 
                     delay(500); // Aguarda estabilização
 
                     // --- Leitura Real via ADS1115 ---
-                    float readA1 = getAVGRading(1); // Leitura do DAC Interno
-                    float readA2 = getAVGRading(2); // Leitura do DAC Externo
+                    // Mapping: A1=VD_Actual, A2=VG_Actual
+                    float readVG = getAVGRading(2); // A2: Measured Gate Voltage
+                    float readVD = getAVGRading(1); // A1: Measured Drain Voltage
 
-                    Serial.printf("  [LIDO]    Interno(A1)=%.3fV, Externo(A2)=%.3fV\n", readA1, readA2);
+                    Serial.printf("  [LIDO]    VG(A2)=%.3fV, VD(A1)=%.3fV\n", readVG, readVD);
                     Serial.println("  [OK] Concluído.");
                 } else {
-                    Serial.println("  [ERRO] Formato inválido.");
+                    Serial.println("  [ERRO] Formato inválido. Use: float float");
                 }
                 
                 inputBuffer = "";

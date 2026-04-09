@@ -298,7 +298,7 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
     for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
         probe += error;  // nudge DAC probe toward target
         if (probe < 0.0f) probe = 0.0f;
-        if (probe > 5.5f) probe = 5.5f;
+        if (probe > hal::EXT_DAC_VREF) probe = hal::EXT_DAC_VREF;
 
         hal::setVDS(probe);
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
@@ -352,7 +352,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
     for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
         probe += error;
         if (probe < 0.0f) probe = 0.0f;
-        if (probe > 5.5f) probe = 5.5f;
+        if (probe > hal::EXT_DAC_VREF) probe = hal::EXT_DAC_VREF;
 
         hal::setVGS(probe);
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
@@ -489,7 +489,7 @@ void MOSFETController::performSweep()
     currentFile_.write((uint8_t*)lineBuf, len);
 
     len = snprintf(lineBuf, sizeof(lineBuf),
-                    "# Shunt: LT1013_gain=%.9f | A3_DC_offset=%.6fV (sw) | Ids: A3 corrected if A3<%.1fV else A0 | PGA: %s\n",
+                    "# Shunt: LM358_gain=%.9f | A3_DC_offset=%.6fV (sw) | Ids: A3 corrected if A3<%.2fV else A0 | PGA: %s\n",
                     1.0f / hal::SHUNT_AMP_GAIN_INV, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
                     (config_.adc_gain_vsh == hal::ADC_GAIN_AUTO) ? "AUTO (oversampled primed by fast)" : "fixed");
     currentFile_.write((uint8_t*)lineBuf, len);
@@ -685,12 +685,12 @@ void MOSFETController::performSweep()
             // Calculate parameters for this curve
             calculateCurveParams(currentCurve);
 
-            currentFile_.printf("# VDS=%.3fV: Vt=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S, SS_Tangent_VGS:%.3f,%.3f SS_Tangent_LogId:%.3f,%.3f\n",
-                       vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm,
+            currentFile_.printf("# VDS=%.3fV: Vt_Gm=%.3fV, Vt_SS=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S, SS_Tangent_VGS:%.3f,%.3f SS_Tangent_LogId:%.3f,%.3f\n",
+                       vds, currentCurve.vt_gm, currentCurve.vt_ss, currentCurve.ss, currentCurve.max_gm,
                        currentCurve.ss_x1, currentCurve.ss_x2, currentCurve.ss_y1, currentCurve.ss_y2);
 
             currentFile_.flush();
-            LOG_INFO("VDS=%6.3fV: Vt=%6.3f, SS=%6.1f mV/dec, MaxGm=%8.2e", vds, currentCurve.vt, currentCurve.ss, currentCurve.max_gm);
+            LOG_INFO("VDS=%6.3fV: Vt_Gm=%6.3f, Vt_SS=%6.3f, SS=%6.1f mV/dec, MaxGm=%8.2e", vds, currentCurve.vt_gm, currentCurve.vt_ss, currentCurve.ss, currentCurve.max_gm);
         }
     }
     
@@ -725,14 +725,16 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
 
     curve.gm = math_engine::calculateGm(curve.ids, curve.vgs_true, gmConfig);
 
-    // 2. Calculate Vt using MathEngine (Peak Gm + Extrapolation) — x-axis: vgs_true
-    curve.vt = math_engine::calculateVt(curve.gm, curve.vgs_true, curve.ids);
+    // 2. Calculate Vt_Gm using MathEngine (Peak Gm + Extrapolation) — x-axis: vgs_true
+    curve.vt_gm = math_engine::calculateVt(curve.gm, curve.vgs_true, curve.ids);
 
     // 3. Find Max Gm
     auto max_gm_it = std::max_element(curve.gm.begin(), curve.gm.end());
     curve.max_gm = (max_gm_it != curve.gm.end()) ? *max_gm_it : 0.0f;
 
-    // 4. Calculate SS and Tangent Line — x-axis: vgs_true
+    // 4. Calculate SS, Tangent Line, and Vt_SS — x-axis: vgs_true
+    //    SS regression uses only points in the subthreshold band [1µA, 100µA].
+    //    Vt_SS = VGS where the SS tangent crosses log10(Ids) = -7 (100 nA).
     math_engine::SSResult ssResult = math_engine::calculateSS(curve.ids, curve.vgs_true);
 
     if (ssResult.valid) {
@@ -741,8 +743,10 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
         curve.ss_y1 = ssResult.y1;
         curve.ss_x2 = ssResult.x2;
         curve.ss_y2 = ssResult.y2;
+        curve.vt_ss = ssResult.vt_ss;  // 0 if not computable
     } else {
         curve.ss = 0.0f;
+        curve.vt_ss = 0.0f;
     }
 }
 
@@ -819,8 +823,8 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     
     // Write summary per curve
     for(const auto& res : results) {
-        len = snprintf(lineBuf, sizeof(lineBuf), "# VDS=%.2fV Vt=%.3fV SS=%.2f mV/dec MaxGm=%.3e S\n", 
-            res.vds, res.vt, res.ss, res.max_gm);
+        len = snprintf(lineBuf, sizeof(lineBuf), "# VDS=%.2fV Vt_Gm=%.3fV Vt_SS=%.3fV SS=%.2f mV/dec MaxGm=%.3e S\n", 
+            res.vds, res.vt_gm, res.vt_ss, res.ss, res.max_gm);
         totalWritten += file.write((uint8_t*)lineBuf, len);
     }
     

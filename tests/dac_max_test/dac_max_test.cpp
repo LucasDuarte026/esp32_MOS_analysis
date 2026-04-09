@@ -4,134 +4,118 @@
 #include <Adafruit_ADS1X15.h>
 #include <driver/dac.h>
 
-// Hardware Configuration
-#define INTERNAL_DAC_CH DAC_CHANNEL_1 // GPIO 25
-#define MCP4725_ADDR 0x60
-#define ADS1115_ADDR 0x48
+// ============================================================================
+// >>>  USER CONFIG: change only this value  <<<
+// ============================================================================
+#define STEP_V          0.001f     // Voltage step per sample (V)
+#define FINAL_V         5.12f      // End voltage (clamped to MAX_VOLTAGE = 5.12V)
+#define SETTLE_MS       5        // Settling time between steps (ms)
 
-// Reference Voltages
-#define VCC_INTERNAL 3.3
-#define VCC_EXTERNAL 4.6 // User reported 4.6V effectively
+// ============================================================================
+// Hardware Configuration (do not change unless rewiring)
+// ============================================================================
+#define MCP4725_VD_ADDR 0x61
+#define MCP4725_VG_ADDR 0x60
+#define ADS1115_ADDR    0x48
 
-enum TestState {
-    STATE_HEADER,
-    STATE_STEPS,
-    STATE_RAMP,
-    STATE_FINISHED
-};
+#define MAX_VOLTAGE     5.12f      // Absolute ceiling (Vref of the 5V bus)
+#define DAC_MAX_CODE    4095
 
-TestState currentState = STATE_HEADER;
-float targetVoltage = 0.0;
-unsigned long stateStartTime = 0;
-int stepIndex = 0;
-const float steps[] = {0.0, 1.0, 2.0, 3.0};
-const int numSteps = sizeof(steps) / sizeof(steps[0]);
-const unsigned long stepDuration = 300; // 300ms per step (1.2s total)
+// ADS1115: Fixed gain GAIN_TWOTHIRDS → FSR ±6.144 V → 187.5 µV/bit
+#define ADC_FSR         6.144f
+#define ADC_MAX_RAW     32767.0f
 
-Adafruit_MCP4725 mcp;
+// ============================================================================
+// Globals
+// ============================================================================
+Adafruit_MCP4725 mcp_vd;
+Adafruit_MCP4725 mcp_vg;
 Adafruit_ADS1115 ads;
 
-// Timing & Logic
-unsigned long lastSampleTime = 0;
-const unsigned long sampleInterval = 25; // 25ms (40Hz)
+float targetVoltage = 0.0f;
+float ceilingV = 0.0f;   // computed in setup: min(FINAL_V, MAX_VOLTAGE)
+bool  finished = false;
 
-void updateDACs(float voltage) {
-    // Internal DAC (8-bit: 0-255) -> Always 3.3V reference
-    int internalVal = (int)((voltage / VCC_INTERNAL) * 255);
-    if (internalVal > 255) internalVal = 255;
-    if (internalVal < 0) internalVal = 0;
-    dac_output_voltage(INTERNAL_DAC_CH, internalVal);
-
-    // External MCP4725 (12-bit: 0-4095) -> Follows VCC_EXTERNAL
-    int externalVal = (int)((voltage / VCC_EXTERNAL) * 4095);
-    if (externalVal > 4095) externalVal = 4095;
-    if (externalVal < 0) externalVal = 0;
-    mcp.setVoltage(externalVal, false);
+// ============================================================================
+// Helpers
+// ============================================================================
+float rawToVolts(int16_t raw) {
+    if (raw < 0) raw = 0;
+    return (float)raw * (ADC_FSR / ADC_MAX_RAW);
 }
 
+void updateDACs(float voltage) {
+    if (voltage > MAX_VOLTAGE) voltage = MAX_VOLTAGE;
+    if (voltage < 0.0f)       voltage = 0.0f;
+    uint16_t val = (uint16_t)((voltage / MAX_VOLTAGE) * DAC_MAX_CODE);
+    mcp_vd.setVoltage(val, false);
+    mcp_vg.setVoltage(val, false);
+}
+
+// ============================================================================
+// Setup
+// ============================================================================
 void setup() {
     Serial.begin(115200);
     Wire.begin();
 
-    // Initialize MCP4725
-    if (!mcp.begin(MCP4725_ADDR)) {
-        Serial.println("# Error: MCP4725 not found!");
-    }
+    if (!mcp_vd.begin(MCP4725_VD_ADDR))
+        Serial.printf("# Error: MCP4725 VD (0x%02X) NOT FOUND!\n", MCP4725_VD_ADDR);
+    else
+        Serial.printf("# Found: MCP4725 VD at 0x%02X\n", MCP4725_VD_ADDR);
 
-    // Initialize ADS1115
-    if (!ads.begin(ADS1115_ADDR)) {
+    if (!mcp_vg.begin(MCP4725_VG_ADDR))
+        Serial.printf("# Error: MCP4725 VG (0x%02X) NOT FOUND!\n", MCP4725_VG_ADDR);
+    else
+        Serial.printf("# Found: MCP4725 VG at 0x%02X\n", MCP4725_VG_ADDR);
+
+    if (!ads.begin(ADS1115_ADDR))
         Serial.println("# Error: ADS1115 not found!");
-    }
-    ads.setGain(GAIN_TWOTHIRDS); // +/- 6.144V (Set AFTER begin for safety)
+    else
+        Serial.printf("# Found: ADS1115 at 0x%02X\n", ADS1115_ADDR);
 
-    // Initialize Internal DAC
-    dac_output_enable(INTERNAL_DAC_CH);
+    ads.setGain(GAIN_TWOTHIRDS);
+    ads.setDataRate(RATE_ADS1115_860SPS);
 
-    stateStartTime = millis();
+    ceilingV = (FINAL_V < MAX_VOLTAGE) ? FINAL_V : MAX_VOLTAGE;
+
+    int totalSteps = (int)(ceilingV / STEP_V) + 1;
+    Serial.printf("# Vref = %.2f V | Step = %.3f V | Final = %.3f V | Points = %d | Settle = %d ms\n",
+                  MAX_VOLTAGE, STEP_V, ceilingV, totalSteps, SETTLE_MS);
+    Serial.printf("# ADC: GAIN_TWOTHIRDS | FSR = %.3f V | Res = %.1f uV/bit\n",
+                  ADC_FSR, (ADC_FSR / ADC_MAX_RAW) * 1e6f);
+
+    Serial.println("Timestamp(ms),Target(V),VD_V,VG_V,A3_V,VD_Raw,VG_Raw,A3_Raw");
 }
 
+// ============================================================================
+// Main Loop — simple ramp: 0 → MAX_VOLTAGE in STEP_V increments
+// ============================================================================
 void loop() {
-    unsigned long now = millis();
+    if (finished) return;
 
-    if (now - lastSampleTime >= sampleInterval) {
-        lastSampleTime = now;
+    // Write target to both DACs
+    updateDACs(targetVoltage);
+    delay(SETTLE_MS);
 
-        switch (currentState) {
-            case STATE_HEADER:
-                Serial.println("Timestamp(ms),Target(V),Int_V,Ext_V,Int_Raw,Ext_Raw");
-                currentState = STATE_STEPS;
-                stateStartTime = now;
-                break;
+    // Read ADC: A1 = VD, A2 = VG, A3 = amplified shunt (all fixed gain)
+    int16_t adc1 = ads.readADC_SingleEnded(1);
+    int16_t adc2 = ads.readADC_SingleEnded(2);
+    int16_t adc3 = ads.readADC_SingleEnded(3);
 
-            case STATE_STEPS:
-                targetVoltage = steps[stepIndex];
-                updateDACs(targetVoltage);
+    Serial.printf("%lu,%.3f,%.4f,%.4f,%.4f,%d,%d,%d\n",
+                  millis(), targetVoltage,
+                  rawToVolts(adc1), rawToVolts(adc2), rawToVolts(adc3),
+                  adc1, adc2, adc3);
 
-                if (now - stateStartTime >= stepDuration) {
-                    stepIndex++;
-                    stateStartTime = now;
-                    if (stepIndex >= numSteps) {
-                        currentState = STATE_RAMP;
-                        targetVoltage = 0.0;
-                    }
-                }
-                break;
-
-            case STATE_RAMP:
-                updateDACs(targetVoltage);
-                targetVoltage += 0.025; // 25mV step (assuming user meant V)
-                if (targetVoltage > 3.3) {
-                    targetVoltage = 3.3;
-                    updateDACs(targetVoltage);
-                    currentState = STATE_FINISHED;
-                }
-                break;
-
-            case STATE_FINISHED:
-                // Test completed, maintain 0V or just stop
-                updateDACs(0.0);
-                return; 
-        }
-
-        // Read ADC Channels
-        // A1 = Internal DAC, A2 = External DAC
-        int16_t adc1 = ads.readADC_SingleEnded(1);
-        int16_t adc2 = ads.readADC_SingleEnded(2);
-
-        float vInternal = ads.computeVolts(adc1);
-        float vExternal = ads.computeVolts(adc2);
-
-        // Print CSV Line
-        Serial.print(now);
-        Serial.print(",");
-        Serial.print(targetVoltage, 3);
-        Serial.print(",");
-        Serial.print(vInternal, 4);
-        Serial.print(",");
-        Serial.print(vExternal, 4);
-        Serial.print(",");
-        Serial.print(adc1);
-        Serial.print(",");
-        Serial.println(adc2);
+    // Advance
+    if (targetVoltage >= ceilingV) {
+        updateDACs(0.0f);
+        Serial.println("# Done. DACs -> 0V.");
+        finished = true;
+        return;
     }
+
+    targetVoltage += STEP_V;
+    if (targetVoltage > ceilingV) targetVoltage = ceilingV;
 }

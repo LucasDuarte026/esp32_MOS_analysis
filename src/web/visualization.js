@@ -273,7 +273,8 @@ function parseCSV(csvText) {
         if (line.startsWith('# VDS=')) {
             try {
                 const vdsMatch = line.match(/VDS=([\d\.]+)V/);
-                const vtMatch = line.match(/Vt=([\d\.]+)V/);
+                const vtGmMatch = line.match(/Vt_Gm=([\d\.]+)V/);
+                const vtSsMatch = line.match(/Vt_SS=([\d\.]+)V/);
                 const ssMatch = line.match(/SS=([0-9\.]+)\s?mV\/dec/);
                 const gmMatch = line.match(/MaxGm=([0-9\.eE\-\+]+)\s?S/);
                 
@@ -281,7 +282,8 @@ function parseCSV(csvText) {
                     const vdsVal = parseFloat(vdsMatch[1]);
                     const vdsKey = Math.round(vdsVal * 1000) / 1000;
                     analysisMap[vdsKey] = {
-                        vt: vtMatch ? parseFloat(vtMatch[1]) : 0,
+                        vt_gm: vtGmMatch ? parseFloat(vtGmMatch[1]) : 0,
+                        vt_ss: vtSsMatch ? parseFloat(vtSsMatch[1]) : 0,
                         ss: ssMatch ? parseFloat(ssMatch[1]) : 0,
                         max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0
                     };
@@ -319,7 +321,8 @@ function parseCSV(csvText) {
         if (isNaN(vgs_true)) vgs_true = vgs;
 
         // Legacy format fallback for Vt/SS (no longer stored per-row in new format)
-        let vt = 0;
+        let vt_gm = 0;
+        let vt_ss = 0;
         let ss = 0;
 
         if (!isNaN(vds_true) && !isNaN(vgs_true)) {
@@ -334,7 +337,8 @@ function parseCSV(csvText) {
 
             // Look up backend-computed metadata by the commanded VDS key
             if (analysisMap[vdsRounded]) {
-                vt = analysisMap[vdsRounded].vt;
+                vt_gm = analysisMap[vdsRounded].vt_gm;
+                vt_ss = analysisMap[vdsRounded].vt_ss;
                 ss = analysisMap[vdsRounded].ss;
             }
 
@@ -350,7 +354,8 @@ function parseCSV(csvText) {
                 vds_true: vdsTrueRounded,  // true terminal VDS (for plot x-axis)
                 vgs_true: vgsTrueRounded,  // true terminal VGS (for plot x-axis)
                 r_shunt: rShunt,           // Store for later trace calculation
-                vt: vt,
+                vt_gm: vt_gm,
+                vt_ss: vt_ss,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
             });
@@ -505,11 +510,10 @@ function updatePlotsMultiCurve() {
 
     const isVDSMode = currentSweepMode === 'VDS';
 
-    // Colors — primary shunt traces: vsh (blue), vsh_precise (red)
+    // Colors — primary trace: Ids (cyan)
     const colors = {
-        vsh: '#2196F3',
-        vsh_precise: '#F44336',
-        gm: '#FF9800', ss: '#AB47BC', vt: '#4CAF50', tangent: '#E91E63'
+        ids: '#00BCD4',
+        gm: '#FF9800', ss: '#AB47BC', vt_gm: '#4CAF50', vt_ss: '#FFEB3B', tangent: '#E91E63'
     };
 
     // ── Filter Data ─────────────────────────────────────────────────────────
@@ -538,19 +542,13 @@ function updatePlotsMultiCurve() {
 
     const xData = plotData.map(d => isVDSMode ? d.vds_true : d.vgs_true);
 
-    // ── Traces — test view: shunt voltages (A0 vs A3 scaled), not Ids
+    // ── Traces — Ids (drain current)
     const traces = [{
         x: xData,
-        y: plotData.map(d => Math.abs(d.vsh)),
+        y: plotData.map(d => Math.abs(d.ids)),
         mode: 'lines',
-        name: 'Vsh (A0)',
-        line: { color: colors.vsh, width: 2 }
-    }, {
-        x: xData,
-        y: plotData.map(d => Math.abs(d.vsh_precise)),
-        mode: 'lines',
-        name: 'Vsh precise (A3)',
-        line: { color: colors.vsh_precise, width: 2 }
+        name: 'Ids (A)',
+        line: { color: colors.ids, width: 2 }
     }];
 
     // 2. Gm trace — only in VGS mode (transfer curves)
@@ -574,19 +572,37 @@ function updatePlotsMultiCurve() {
         const meta = fileAnalysisMap[vdsKey];
 
         if (meta) {
-            // Vt vertical line
-            if (meta.vt > 0 && visibleCurves.vt) {
-                shapes.push({
-                    type: 'line',
-                    x0: meta.vt, y0: 0, x1: meta.vt, y1: 1,
-                    xref: 'x', yref: 'paper',
-                    line: { color: colors.vt, width: 2, dash: 'dash' }
-                });
-                annotations.push({
-                    x: meta.vt, y: 1, xref: 'x', yref: 'paper',
-                    text: `Vt=${meta.vt.toFixed(2)}V`,
-                    showarrow: false, yanchor: 'bottom', font: { color: colors.vt }
-                });
+            // Vt vertical lines
+            if (visibleCurves.vt) {
+                // Vth Gm
+                if (meta.vt_gm > 0) {
+                    shapes.push({
+                        type: 'line',
+                        x0: meta.vt_gm, y0: 0, x1: meta.vt_gm, y1: 1,
+                        xref: 'x', yref: 'paper',
+                        line: { color: colors.vt_gm, width: 2, dash: 'dash' }
+                    });
+                    annotations.push({
+                        x: meta.vt_gm, y: 1, xref: 'x', yref: 'paper',
+                        text: `Gm: ${meta.vt_gm.toFixed(2)}V`,
+                        showarrow: false, yanchor: 'bottom', font: { color: colors.vt_gm }
+                    });
+                }
+                
+                // Vth SS
+                if (meta.vt_ss > 0) {
+                    shapes.push({
+                        type: 'line',
+                        x0: meta.vt_ss, y0: 0, x1: meta.vt_ss, y1: 1,
+                        xref: 'x', yref: 'paper',
+                        line: { color: colors.vt_ss, width: 2, dash: 'dot' }
+                    });
+                    annotations.push({
+                        x: meta.vt_ss, y: 0.95, xref: 'x', yref: 'paper', // Offset slightly to avoid overlap
+                        text: `SS: ${meta.vt_ss.toFixed(2)}V`,
+                        showarrow: false, yanchor: 'bottom', font: { color: colors.vt_ss }
+                    });
+                }
             }
 
             // SS tangent (log scale only)
@@ -613,7 +629,7 @@ function updatePlotsMultiCurve() {
         title: plotTitle,
         xaxis: { title: xAxisTitle },
         yaxis: {
-            title: 'Tensão shunt (V)',
+            title: 'Ids (A)',
             titlefont: { color: '#e0e0e0' },
             tickfont: { color: '#e0e0e0' },
             type: isVDSMode ? 'linear' : scaleType,  // IdVd always linear
@@ -644,13 +660,15 @@ function updatePlotsMultiCurve() {
 }
 
 function updateMetrics(plotData, meta) {
-    const vtEl = document.getElementById('metric-vt');
+    const vtGmEl = document.getElementById('metric-vt-gm');
+    const vtSsEl = document.getElementById('metric-vt-ss');
     const gmEl = document.getElementById('metric-gm');
     const ssEl = document.getElementById('metric-ss');
 
     if (currentSweepMode === 'VDS') {
-        const msg = "N/A (VDS Mode)";
-        if (vtEl) vtEl.textContent = msg;
+        const msg = "N/A";
+        if (vtGmEl) vtGmEl.textContent = msg;
+        if (vtSsEl) vtSsEl.textContent = msg;
         if (gmEl) gmEl.textContent = msg;
         if (ssEl) ssEl.textContent = msg;
         return;
@@ -658,7 +676,8 @@ function updateMetrics(plotData, meta) {
 
     // Use metadata if available, else calc
     if (meta) {
-        if (vtEl) vtEl.textContent = meta.vt ? `${meta.vt.toFixed(3)} V` : '-';
+        if (vtGmEl) vtGmEl.textContent = meta.vt_gm ? `${meta.vt_gm.toFixed(3)} V` : '-';
+        if (vtSsEl) vtSsEl.textContent = meta.vt_ss ? `${meta.vt_ss.toFixed(3)} V` : '-';
         if (gmEl) gmEl.textContent = meta.max_gm ? `${(meta.max_gm * 1000).toFixed(3)} mS` : '-';
         if (ssEl) ssEl.textContent = meta.ss ? `${meta.ss.toFixed(1)} mV/dec` : '-';
     } else {

@@ -25,7 +25,8 @@
 //   HW_EXTERNAL mode (default) — fully I2C since v4.2.0:
 //     - DAC VDS : ExternalDAC2 MCP4725 (I2C 0x61, ADDR→VCC, 12-bit)
 //     - DAC VGS : ExternalDAC  MCP4725 (I2C 0x60, ADDR→GND, 12-bit)
-//     - ADC     : ExternalADC  ADS1115 (I2C 0x48, A0, 16-bit + oversampling)
+//     - ADC     : ExternalADC  ADS1115 (I2C 0x48, 16-bit + oversampling)
+//                 Mapping: A0=Shunt(Nom), A1=VD_Actual, A2=VG_Actual, A3=Shunt(Amp)
 // ============================================================================
 
 namespace hal {
@@ -134,9 +135,9 @@ struct HalConfig {
     // Reference voltages and safety limits
     float dac_vref       = 3.3f; // ESP32 Internal DAC Ref
     float adc_vref       = 3.3f; // ESP32 Internal ADC Ref
-    float ext_dac_vref   = 5.0f; // MCP4725 VDD Ref
-    float max_vds        = 5.0f; // Allow up to 5V (clipped internally later if needed)
-    float max_vgs        = 5.0f; // Allow up to 5V (clipped internally later if needed)
+    float ext_dac_vref   = 5.12f; // MCP4725 VDD Ref
+    float max_vds        = 5.0f;  // Capped at 5.0V even if supply is higher
+    float max_vgs        = 5.0f;  // Capped at 5.0V even if supply is higher
 };
 
 // ============================================================================
@@ -146,24 +147,38 @@ constexpr uint8_t  DAC_VDS_PIN    = 25;  // DAC Channel 1 — controls VDS (Drai
 constexpr uint8_t  DAC_VGS_PIN    = 26;  // DAC Channel 2 — controls VGS (Gate)
 constexpr uint8_t  ADC_SHUNT_PIN  = 34;  // ADC1_CH6       — reads shunt resistor voltage
 
-// Shunt Resistor Channel Mapping (ADS1115)
-constexpr uint8_t  ADC_SHUNT_NOM_CH    = 0;  // Direct shunt (low precision)
-constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // Amplified shunt (high precision via LT1013)
+// ADC Channel Mapping (ADS1115)
+constexpr uint8_t  ADC_SHUNT_NOM_CH    = 0;  // A0: Direct shunt (low precision)
+constexpr uint8_t  ADC_VD_ACTUAL_CH    = 1;  // A1: Measured Drain Voltage (VD)
+constexpr uint8_t  ADC_VG_ACTUAL_CH    = 2;  // A2: Measured Gate Voltage (VG)
+constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // A3: Amplified shunt (via LM358)
 
-// Amplified Shunt Gain Parameters (A3: vsh_precise = f(raw_a3_volts))
-constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.303951368f;
+/** Master switch: use A3 amplified channel (vsh_precise) for low-current Ids.
+ *  true  → A3 scaled for Ids while raw_a3 < threshold, then A0.
+ *  false → always use A0 (vsh) for Ids calculation.
+ *  Override before #include "hardware_hal.h" or via build flags (-DUSE_VSH_PRECISE=false). */
+#ifndef USE_VSH_PRECISE
+#define USE_VSH_PRECISE false
+#endif
+
+// ── LM358 Amplified Shunt Parameters (A3: vsh_precise = f(raw_a3_volts)) ──
+// The LM358 amplifies the shunt voltage ×31.49 before the ADS1115 A3 input.
+// Theoretical gain: 31.486322188  (non-inverting: 1 + R2/R1)
+// Saturation: ~3.77 V output → trust readings up to 3.70 V max.
+constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.486322188f;
 
 /**
- * DC offset (V) subtracted from (raw_a3 * SHUNT_AMP_GAIN_INV): LT1013 / ground-bounce vs shunt GND.
+ * DC offset (V) subtracted AFTER dividing by gain: LM358 input offset + ground-bounce.
+ * Measured absolute post-conversion offset: 58.2 mV.
  * Set to 0.f to disable. Tune from CSV (vsh_precise vs vsh in linear region).
- * Ref: LT1013 has typical offset of 150 uV.
  */
-constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.00015f; 
+constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.0582f;
 
-/** If A3 ADC voltage (before gain) is >= this, use A0 direct shunt for Ids (amplifier saturation). */
-constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 5.0f;
+/** If A3 ADC voltage (before ÷ gain) is >= this, use A0 direct shunt for Ids
+ *  (LM358 saturates at ~3.77 V; we switch at 3.70 V for safety margin). */
+constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 3.70f;
 
-/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LT1013 gain, then − offset. */
+/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LM358 gain, then − offset. */
 inline float shuntAmplifiedAdcToVoltage(float raw_a3_volts) {
     float v = raw_a3_volts * SHUNT_AMP_GAIN_INV;
     if (v > SHUNT_AMP_A3_OFFSET_V) {
@@ -204,7 +219,7 @@ constexpr uint8_t  EXT_DAC_VGS_ADDR  = 0x60;  // ADDR pin → GND
 constexpr uint8_t  EXT_DAC_VDS_ADDR  = 0x61;  // ADDR pin → VCC
 constexpr uint8_t  EXT_DAC_BITS      = 12;
 constexpr uint16_t EXT_DAC_MAX_VALUE = 4095;
-constexpr float    EXT_DAC_VREF      = 5.0f; // Updated to 5.0V based on hardware readings
+constexpr float    EXT_DAC_VREF      = 5.12f; // Updated to 5.12V based on hardware readings
 
 // External ADC (ADS1115 — 16-bit, configurable PGA gain via setGain())
 // Default FSR = GAIN_SIXTEEN (±0.256 V) for 1.33 Ω shunt / 20 mA max (V_shunt ~26.6 mV).

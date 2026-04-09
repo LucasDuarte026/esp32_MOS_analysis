@@ -193,7 +193,7 @@ A tensão de dreno VD é gerada pelo MCP4725 @ 0x61, seguido por um buffer basea
 | ADS1115 | 3,3 V – 5,0 V | USB direto (5V) |
 | LT1013 | 5,0 V | USB direto |
 | MOSFET DUT (dreno) | 0 – 5,0 V | DAC MCP4725 → buffer LT1013 |
-| MOSFET DUT (porta) | 0 – 5,0 V | DAC MCP4725 → direto |
+| MOSFET DUT (porta) | 0 – 5,12 V| DAC MCP4725 → direto |
 
 ---
 
@@ -229,7 +229,7 @@ A queda no shunt é desprezível em comparação com VGS (~0,5–2,5 V). O MOSFE
 #### Configuração Elétrica
 
 - **Shunt:** 100 Ω (série com o Source)
-- **Leitura de Ids:** Canal A3 (amplificado ×31,3) como primário; fallback para A0 quando `raw_a3 ≥ 5,0 V`
+- **Leitura de Ids:** Canal A3 (amplificado ×31,3) como primário; fallback para A0 quando `raw_a3 ≥ 5,12 V`
 - **VGS varrido:** 0 V → ~3,5 V (englobando a transição subthreshold → acima de Vth)
 - **VDS fixo:** 0,1 V a 0,5 V (mantém saturação profunda para que Ids ≈ f(VGS) apenas)
 
@@ -771,7 +771,7 @@ performSweep() — Core 1
 │  │  │  │    raw_a3     ← readShuntAMPRawFast()  [A3, fast]             │
 │  │  │  │    vsh_precise = raw_a3 / 31.304 − 0.072                      │
 │  │  │  │    vsh_a0     ← readShuntVoltage()     [A0, oversampled]      │
-│  │  │  │    vsh_for_ids = (raw_a3 < 5.0V) ? vsh_precise : vsh_a0      │
+│  │  │  │    vsh_for_ids = (raw_a3 < 5.12V) ? vsh_precise : vsh_a0     │
 │  │  │  │                                                               │
 │  │  │  │  ids       = vsh_for_ids / Rshunt                             │
 │  │  │  │  vds_true  = vd_actual − vsh_for_ids                          │
@@ -784,7 +784,7 @@ performSweep() — Core 1
 │  │  │    Gm  ← calculateGm()  [Savitzky-Golay + diff. central]
 │  │  │    Vth ← calculateVt()  [Peak Gm → extrapolação]
 │  │  │    SS  ← calculateSS()  [sliding-window regression]
-│  │  │  Escreve comentário CSV: # VDS=x: Vt=y, SS=z, MaxGm=w
+│  │  │  Escreve comentário CSV: # VDS=x: Vt_Gm=y, Vt_SS=w, SS=z, MaxGm=k
 │  │  └─────────────────────────────────────────────────────────────────┘
 │
 │  ┌─────────────────────────────────────────────────────────────────────┐
@@ -863,14 +863,14 @@ Entrada: ids[], vgs_true[]
 # ADC Gains: VSh=AUTO (Dynamic Optimize), VD=AUTO, VG=AUTO
 # HW: Fully External (VDS: MCP4725@0x61, VGS: MCP4725@0x60, ADC: ADS1115@0x48)
 # Firmware: 9.3.1
-# Shunt: LT1013_gain=31.303951368 | A3_DC_offset=0.0002V | Switch threshold=5.0V | PGA: AUTO
+# Shunt: LT1013_gain=31.303951368 | A3_DC_offset=0.0002V | Switch threshold=5.12V | PGA: AUTO
 #
 timestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids
 1701234567,0.100,0.000,0.1018,0.0009,0.000001,0.000001,0.1018,0.0009,1.00e-08
 1701234717,0.100,0.005,0.1019,0.0053,0.000001,0.000001,0.1019,0.0053,9.87e-09
 ...
 1701269999,0.100,3.500,0.1021,3.5002,0.004512,0.004489,0.0976,3.4957,4.49e-05
-# VDS=0.100V: Vt=1.523V, SS=87.45 mV/dec, MaxGm=2.34e-03 S,
+# VDS=0.100V: Vt_Gm=1.523V, Vt_SS=1.490V, SS=87.45 mV/dec, MaxGm=2.34e-03 S, SS_Tangent_VGS:...
 #   SS_Tangent_VGS:0.800,1.300  SS_Tangent_LogId:-9.200,-8.123
 ```
 

@@ -32,6 +32,9 @@ struct SSResult {
     float x2 = 0.0f;  // VGS end
     float y2 = 0.0f;  // log10(IDS) end
     
+    // Vth extracted from SS tangent: VGS where log10(Ids) = -7 (100 nA reference)
+    float vt_ss = 0.0f;         // 0 if not computable
+    
     // Region used for calculation
     size_t regionStart = 0;
     size_t regionEnd = 0;

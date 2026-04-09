@@ -91,10 +91,10 @@ void loop() {
   Serial.println("================================================");
   Serial.println("Alvo_Esp(V) | Enviado_DAC | Lido_A2(V) | Erro(V)");
   
-  // MCP4725 is 12-bit (0-4095), approx 0-4.9V
+  // MCP4725 is 12-bit (0-4095), approx 0-5.12V
   for (int step = 0; step <= 4095; step += 256) {
     mcp.setVoltage(step, false);
-    float v_esperada = (step / 4095.0f) * 4.9f; // Assumindo FSR de 4.9V
+    float v_esperada = (step / 4095.0f) * 5.12f; // Assumindo FSR de 5.12V
     
     delay(SETTLING_TIME_MS);
     

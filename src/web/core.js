@@ -6,7 +6,7 @@
 // =============================================================================
 // Global Variables & State
 // =============================================================================
-let currentVDD = 5.0; // Default VDD voltage
+let currentVDD = 5.12; // Default VDD voltage
 let usbConnected = false;
 
 // Debug Configuration
@@ -101,7 +101,7 @@ async function updateSystemInfo() {
 
         // Update VDD if USB is connected
         if (data.usb_connected) {
-            currentVDD = 5.0;
+            currentVDD = 5.12;
         }
     } catch (error) {
         // console.error('Error fetching system info:', error); // Suppress frequent errors

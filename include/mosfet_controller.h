@@ -26,7 +26,7 @@
 // ============================================================================
 /// Maximum allowed VDS read-back error (|VD_read - VSH - target_vds|) before
 /// entering the correction loop [V].
-/// Set to 2 mV — consistent with MCP4725 resolution (1.22 mV/step) and LT1013 offset (~150 uV).
+/// Set to 2 mV — consistent with MCP4725 resolution (1.22 mV/step) and LM358 offset (~58.2 mV post-conversion).
 #define VDS_GLOBAL_ERROR   0.002f
 /// Maximum allowed VGS read-back error. Kept at 2mV — dominated by source
 /// degeneration that varies with Ids, not by DAC/amp resolution.
@@ -191,7 +191,8 @@ private:
     // Flushed to disk after calculateCurveParams() and then cleared.
     struct CurveData {
         float vds;      ///< Fixed VDS for this curve (V)
-        float vt;       ///< Threshold voltage (V)
+        float vt_gm;    ///< Threshold voltage via peak-Gm extrapolation (V)
+        float vt_ss;    ///< Threshold voltage via SS tangent intercept at 100nA (V)
         float ss;       ///< Subthreshold swing (mV/decade)
         float max_gm;   ///< Peak transconductance (S)
         float rshunt;   ///< Rshunt passed in for downstream validity checks

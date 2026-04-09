@@ -246,7 +246,7 @@ bool ExternalADC::begin() {
 }
 
 uint16_t ExternalADC::readRaw() {
-    return readRaw(0); // Default channel A0
+    return readRaw(ADC_SHUNT_NOM_CH); // Default channel A0
 }
 
 uint16_t ExternalADC::readRaw(uint8_t channel) {
@@ -258,7 +258,7 @@ uint16_t ExternalADC::readRaw(uint8_t channel) {
 }
 
 float ExternalADC::readVoltage() {
-    return readVoltage(0, currentGainCode_);
+    return readVoltage(ADC_SHUNT_NOM_CH, currentGainCode_);
 }
 
 float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
@@ -325,7 +325,7 @@ float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
 }
 
 float ExternalADC::readVoltageFast() {
-    return readVoltageFast(0, currentGainCode_);
+    return readVoltageFast(ADC_SHUNT_NOM_CH, currentGainCode_);
 }
 
 float ExternalADC::readVoltageFast(uint8_t channel, uint8_t gainOverride) {
@@ -604,17 +604,17 @@ String HardwareHAL::getHardwareSummary() const {
 }
 
 float HardwareHAL::readShuntVoltage(uint8_t gainCode) {
-    return adcShunt_->readVoltage(0, gainCode); // A0 mapped to Shunt
+    return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode); // A0 mapped to Shunt
 }
 
 float HardwareHAL::readVD_Actual(uint8_t gainCode) {
     // Assuming external routing via ADS1115 for VDS at A1
-    return adcShunt_->readVoltage(1, gainCode); 
+    return adcShunt_->readVoltage(ADC_VD_ACTUAL_CH, gainCode); 
 }
 
 float HardwareHAL::readVG_Actual(uint8_t gainCode) {
     // Assuming external routing via ADS1115 for VGS at A2
-    return adcShunt_->readVoltage(2, gainCode);
+    return adcShunt_->readVoltage(ADC_VG_ACTUAL_CH, gainCode);
 }
 
 float HardwareHAL::readShuntVoltageFast(uint8_t gainCode) {
@@ -634,24 +634,32 @@ float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode) {
     if (!shunt_adc_external_) {
         return readShuntVoltage(gainCode);
     }
+#if USE_VSH_PRECISE
     // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
     float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
     if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
         return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
     }
     return shuntAmplifiedAdcToVoltage(raw_a3);
+#else
+    return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+#endif
 }
 
 float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode) {
     if (!shunt_adc_external_) {
         return readShuntVoltageFast(gainCode);
     }
+#if USE_VSH_PRECISE
     // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
     float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
     if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
         return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
     }
     return shuntAmplifiedAdcToVoltage(raw_a3);
+#else
+    return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
+#endif
 }
 
 ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode) {
@@ -667,16 +675,20 @@ ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode) {
     s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
     s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
     s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+#if USE_VSH_PRECISE
     s.vsh_for_ids = (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) ? s.vsh_a0 : s.vsh_precise;
+#else
+    s.vsh_for_ids = s.vsh_a0;
+#endif
     return s;
 }
 
 float HardwareHAL::readVD_ActualFast(uint8_t gainCode) {
-    return adcShunt_->readVoltageFast(1, gainCode);
+    return adcShunt_->readVoltageFast(ADC_VD_ACTUAL_CH, gainCode);
 }
 
 float HardwareHAL::readVG_ActualFast(uint8_t gainCode) {
-    return adcShunt_->readVoltageFast(2, gainCode);
+    return adcShunt_->readVoltageFast(ADC_VG_ACTUAL_CH, gainCode);
 }
 
 ExternalDAC* HardwareHAL::getExternalVDS() {
