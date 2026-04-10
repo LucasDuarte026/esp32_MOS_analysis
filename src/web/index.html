@@ -105,6 +105,33 @@
                                         style="display: block; margin-top: var(--spacing-sm); text-align: center;">
                                         <span id="sweep-mode-desc">Varia VGS para cada VDS fixo (padrão)</span>
                                     </small>
+
+                                    <!-- Shunt Precision Toggle -->
+                                    <h3
+                                        style="margin-top: var(--spacing-lg); margin-bottom: var(--spacing-md); display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                        Precisão do Shunt
+                                        <span class="tooltip-trigger" tabindex="0">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888"
+                                                stroke-width="2">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                                            </svg>
+                                            <div class="tooltip-content" style="width: 280px; text-align: left;">
+                                                <strong>Amplificação de Corrente</strong><br><br>
+                                                A corrente é calculada com auxílio de um LM358 que amplifica o sinal de
+                                                baixas correntes, melhorando a precisão na região de sublimiar.
+                                            </div>
+                                        </span>
+                                    </h3>
+                                    <div class="sweep-mode-toggle">
+                                        <span class="mode-label mode-active" id="precision-on-label">Com Precisão</span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="precision-toggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <span class="mode-label mode-dimmed" id="precision-off-label">Sem Precisão</span>
+                                    </div>
                                 </div>
 
                                 <!-- Hardware Mode Toggle (red) -->

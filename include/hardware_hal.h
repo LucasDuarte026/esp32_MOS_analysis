@@ -153,12 +153,8 @@ constexpr uint8_t  ADC_VD_ACTUAL_CH    = 1;  // A1: Measured Drain Voltage (VD)
 constexpr uint8_t  ADC_VG_ACTUAL_CH    = 2;  // A2: Measured Gate Voltage (VG)
 constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // A3: Amplified shunt (via LM358)
 
-/** Master switch: use A3 amplified channel (vsh_precise) for low-current Ids.
- *  true  → A3 scaled for Ids while raw_a3 < threshold, then A0.
- *  false → always use A0 (vsh) for Ids calculation.
- *  Override before #include "hardware_hal.h" or via build flags (-DUSE_VSH_PRECISE=false). */
 #ifndef USE_VSH_PRECISE
-#define USE_VSH_PRECISE false
+#define USE_VSH_PRECISE true
 #endif
 
 // ── LM358 Amplified Shunt Parameters (A3: vsh_precise = f(raw_a3_volts)) ──
@@ -168,9 +164,10 @@ constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // A3: Amplified shunt (via LM358)
 constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.486322188f;
 
 /**
- * DC offset (V) subtracted AFTER dividing by gain: LM358 input offset + ground-bounce.
- * Measured absolute post-conversion offset: 58.2 mV.
- * Set to 0.f to disable. Tune from CSV (vsh_precise vs vsh in linear region).
+ * DC offset (V) subtracted from the RAW A3 voltage BEFORE dividing by gain.
+ * This represents the LM358 output offset (input offset * gain).
+ * Measured absolute pre-conversion offset at A3 pin: 58.2 mV.
+ * Set to 0.f to disable. 
  */
 constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.0582f;
 
@@ -178,15 +175,12 @@ constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.0582f;
  *  (LM358 saturates at ~3.77 V; we switch at 3.70 V for safety margin). */
 constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 3.70f;
 
-/** A3 ADC pin (V) → shunt-equivalent (V): ÷ LM358 gain, then − offset. */
+/** A3 ADC pin (V) → shunt-equivalent (V): − offset, then ÷ LM358 gain. */
 inline float shuntAmplifiedAdcToVoltage(float raw_a3_volts) {
-    float v = raw_a3_volts * SHUNT_AMP_GAIN_INV;
-    if (v > SHUNT_AMP_A3_OFFSET_V) {
-        v -= SHUNT_AMP_A3_OFFSET_V;
-    } else {
-        v = 0.f;
+    if (raw_a3_volts > SHUNT_AMP_A3_OFFSET_V) {
+        return (raw_a3_volts - SHUNT_AMP_A3_OFFSET_V) * SHUNT_AMP_GAIN_INV;
     }
-    return v;
+    return 0.f;
 }
 
 /** PGA code 255 = auto-range per ADS1115 channel (independent lastAutoGain_[ch]). */
@@ -454,10 +448,10 @@ public:
     /** Raw A3 voltage at ADS1115 input (before ÷ gain). */
     float readShuntVoltageAMPRawFast(uint8_t gainCode);
     /** Shunt voltage for Ids / differential calibration: A3 scaled if A3 < threshold, else A0. */
-    float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255);
-    float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255);
+    float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255, bool usePrecise = true);
+    float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255, bool usePrecise = true);
     /** A3 fast then A0 oversampled; PGA auto when gainCode == ADC_GAIN_AUTO. */
-    ShuntSample measureShuntSample(uint8_t gainCode = 255);
+    ShuntSample measureShuntSample(uint8_t gainCode = 255, bool usePrecise = true);
     float readVD_ActualFast(uint8_t gainCode = 255);
     float readVG_ActualFast(uint8_t gainCode = 255);
 
@@ -501,9 +495,9 @@ float readVG_Actual(uint8_t gainCode = 255);
 float readShuntVoltageFast(uint8_t gainCode = 255);
 float readShuntVoltageAMPFast(uint8_t gainCode);
 float readShuntVoltageAMPRawFast(uint8_t gainCode);
-float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255);
-float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255);
-ShuntSample measureShuntSample(uint8_t gainCode = 255);
+float readShuntVoltageEffectiveForIds(uint8_t gainCode = 255, bool usePrecise = true);
+float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode = 255, bool usePrecise = true);
+ShuntSample measureShuntSample(uint8_t gainCode = 255, bool usePrecise = true);
 float readVD_ActualFast(uint8_t gainCode = 255);
 float readVG_ActualFast(uint8_t gainCode = 255);
 void  setADC_Gain(uint8_t gainCode);

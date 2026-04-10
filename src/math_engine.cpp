@@ -239,11 +239,12 @@ SSResult calculateSS(
     const size_t n = ids.size();
 
     // ── Step 1: build log10(Ids) array; mark valid subthreshold points ─────
-    // Only consider points where |Ids| is in the subthreshold band [1e-6, 1e-4] A.
-    // This avoids fitting noise (below 1µA) or strong-inversion (above 100µA).
-    const float IDS_FLOOR    = 1e-9f;   // absolute minimum to take log
-    const float IDS_SUB_LOW  = 1e-6f;   // lower bound of subthreshold band
-    const float IDS_SUB_HIGH = 1e-4f;   // upper bound of subthreshold band
+    // Only consider points where |Ids| is in the subthreshold band [1e-8, 1e-4] A.
+    // The 1k shunt allows clean readings down to ~10nA, where the true exponential
+    // region lies before moving into moderate inversion near 1µA.
+    const float IDS_FLOOR    = 5e-10f;  // absolute minimum to take log
+    const float IDS_SUB_LOW  = 1e-8f;   // lower bound of subthreshold band (10 nA)
+    const float IDS_SUB_HIGH = 1e-4f;   // upper bound of subthreshold band (100 µA)
 
     std::vector<float> logIds(n, 0.0f);
     std::vector<bool>  usable(n, false);
@@ -307,7 +308,10 @@ SSResult calculateSS(
             const float MIN_SLOPE_DEC_PER_V = 1.0f;
             if (slope < MIN_SLOPE_DEC_PER_V) continue;
 
-            if (r2 > bestR2) {
+            // Optimization target: the true subthreshold region is the STEEPEST exponential slope
+            // before strong inversion. Ohmic leakage often has a smoother but gentler slope.
+            // So we select the maximum slope that possesses a valid linear R² (>= 0.85).
+            if (r2 >= 0.85f && slope > bestSlope) {
                 bestR2        = r2;
                 bestSlope     = slope;
                 bestIntercept = intercept;
@@ -318,10 +322,8 @@ SSResult calculateSS(
     }
 
     // ── Step 3: validate and produce result ────────────────────────────────
-    // Accept R² ≥ 0.85 (relaxed from 0.9 to handle noisy/short regions)
-    const float MIN_R2 = 0.85f;
 
-    if (bestR2 >= MIN_R2 && bestSlope > 1e-9f) {
+    if (bestR2 >= 0.85f && bestSlope > 1e-9f) {
         float ss_val = (1.0f / bestSlope) * 1000.0f;  // mV/dec
 
         // Physically plausible range: 60 mV/dec (ideal) … 1000 mV/dec
@@ -336,17 +338,6 @@ SSResult calculateSS(
             result.y1 = bestSlope * result.x1 + bestIntercept;
             result.x2 = vgs[bestWinEnd];
             result.y2 = bestSlope * result.x2 + bestIntercept;
-
-            // ── Vt_SS: VGS where SS tangent line crosses log10(Ids) = -7 (100 nA)
-            // From: log10(Ids) = slope * VGS + intercept
-            //       VGS_at_ref = (log10_ref - intercept) / slope
-            const float LOG10_IDS_REF = -7.0f;  // 100 nA = 1e-7 A
-            float vt_ss_candidate = (LOG10_IDS_REF - bestIntercept) / bestSlope;
-
-            // Sanity: Vt_SS must be > 0 and within a reasonable range of the data
-            if (vt_ss_candidate > 0.0f && vt_ss_candidate < vgs.back() + 0.5f) {
-                result.vt_ss = vt_ss_candidate;
-            }
         }
     }
 

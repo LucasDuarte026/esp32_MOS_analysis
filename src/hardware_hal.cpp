@@ -630,39 +630,39 @@ float HardwareHAL::readShuntVoltageAMPRawFast(uint8_t gainCode) {
     return adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
 }
 
-float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode) {
+float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode, bool usePrecise) {
     if (!shunt_adc_external_) {
         return readShuntVoltage(gainCode);
     }
-#if USE_VSH_PRECISE
-    // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
-    float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
-    if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+    if (usePrecise) {
+        // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+        if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+        }
+        return shuntAmplifiedAdcToVoltage(raw_a3);
+    } else {
         return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
     }
-    return shuntAmplifiedAdcToVoltage(raw_a3);
-#else
-    return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
-#endif
 }
 
-float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode) {
+float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode, bool usePrecise) {
     if (!shunt_adc_external_) {
         return readShuntVoltageFast(gainCode);
     }
-#if USE_VSH_PRECISE
-    // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
-    float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
-    if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+    if (usePrecise) {
+        // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+        if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
+        }
+        return shuntAmplifiedAdcToVoltage(raw_a3);
+    } else {
         return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
     }
-    return shuntAmplifiedAdcToVoltage(raw_a3);
-#else
-    return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
-#endif
 }
 
-ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode) {
+ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode, bool usePrecise) {
     ShuntSample s;
     if (!shunt_adc_external_) {
         s.vsh_a0 = readShuntVoltage(gainCode);
@@ -675,11 +675,11 @@ ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode) {
     s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
     s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
     s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
-#if USE_VSH_PRECISE
-    s.vsh_for_ids = (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) ? s.vsh_a0 : s.vsh_precise;
-#else
-    s.vsh_for_ids = s.vsh_a0;
-#endif
+    if (usePrecise) {
+        s.vsh_for_ids = (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) ? s.vsh_a0 : s.vsh_precise;
+    } else {
+        s.vsh_for_ids = s.vsh_a0;
+    }
     return s;
 }
 
@@ -720,9 +720,9 @@ float readVG_Actual(uint8_t gainCode)         { return HardwareHAL::instance().r
 float readShuntVoltageFast(uint8_t gainCode)  { return HardwareHAL::instance().readShuntVoltageFast(gainCode); }
 float readShuntVoltageAMPFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPFast(gainCode); }
 float readShuntVoltageAMPRawFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPRawFast(gainCode); }
-float readShuntVoltageEffectiveForIds(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageEffectiveForIds(gainCode); }
-float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageEffectiveForIdsFast(gainCode); }
-ShuntSample measureShuntSample(uint8_t gainCode) { return HardwareHAL::instance().measureShuntSample(gainCode); }
+float readShuntVoltageEffectiveForIds(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().readShuntVoltageEffectiveForIds(gainCode, usePrecise); }
+float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().readShuntVoltageEffectiveForIdsFast(gainCode, usePrecise); }
+ShuntSample measureShuntSample(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().measureShuntSample(gainCode, usePrecise); }
 float readVD_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVD_ActualFast(gainCode); }
 float readVG_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVG_ActualFast(gainCode); }
 void setADC_Gain(uint8_t g)   { HardwareHAL::instance().setADC_Gain(g); }

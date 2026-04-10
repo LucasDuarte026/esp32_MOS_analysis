@@ -103,7 +103,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   String body = String((char*)data).substring(0, len);
   LOG_DEBUG("Request body: %s", body.c_str());
   
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError error = deserializeJson(doc, body);
   
   if (error) {
@@ -123,7 +123,8 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
       tv.tv_sec = ts;
       tv.tv_usec = 0;
       settimeofday(&tv, NULL);
-      LOG_INFO("System time synchronized to: %lu", ts);
+      tzset(); // Apply TZ immediately
+      LOG_INFO("System time synchronized to: %lu (Local: %s)", ts, ctime(&tv.tv_sec));
     }
   }
   
@@ -143,6 +144,21 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   
   const char* sweepModeStr = doc["sweep_mode"] | "VGS";
   config.sweep_mode = (strcmp(sweepModeStr, "VDS") == 0) ? SWEEP_VDS : SWEEP_VGS;
+  config.use_vsh_precise = doc["use_vsh_precise"] | true;
+
+  // Ensure V_start <= V_end for both axes
+  if (config.vgs_start > config.vgs_end) {
+    float temp = config.vgs_start;
+    config.vgs_start = config.vgs_end;
+    config.vgs_end = temp;
+    LOG_WARN("VGS range swapped: %.3f to %.3fV", config.vgs_start, config.vgs_end);
+  }
+  if (config.vds_start > config.vds_end) {
+    float temp = config.vds_start;
+    config.vds_start = config.vds_end;
+    config.vds_end = temp;
+    LOG_WARN("VDS range swapped: %.3f to %.3fV", config.vds_start, config.vds_end);
+  }
   
   // Oversampling configuration (1 = disabled, 16 = default)
   uint16_t oversampling = doc["oversampling"] | 16;
@@ -657,6 +673,11 @@ void setup()
 {
   Serial.begin(115200);
   delay(100);
+
+  // Set timezone for Sao Paulo, Brazil (UTC-3, no DST)
+  setenv("TZ", "<-03>3", 1);
+  tzset();
+
   initAsyncLogging();
   debug_mode::init();
 

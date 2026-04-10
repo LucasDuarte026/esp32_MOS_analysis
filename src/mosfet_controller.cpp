@@ -279,13 +279,27 @@ float MOSFETController::readAnalogVoltage()
 float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 {
     // Initial probe: use target + current shunt drop as better guess
-    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
+    
+    // NEW CHECK: Pre-calibration overpower limit
+    float p_shunt = (vsh_init * vsh_init) / config_.rshunt;
+    if (p_shunt > 1.25f) {
+        LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W during CALIB VDS! Aborting.", p_shunt);
+        hasError_ = true;
+        char errMsg[256];
+        snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA EXCEDIDA (%.3fW) NA CALIBRACAO DE VDS!\nAlvo original: %.2fV", p_shunt, target_vds);
+        errorMessage_ = String(errMsg);
+        cancelled_ = true;
+        hal::shutdown();
+        return target_vds;
+    }
+
     float probe = target_vds + vsh_init;
     hal::setVDS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
     float vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
-    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
     float vds_meas = vd_read - vsh;
     float error    = target_vds - vds_meas;
 
@@ -304,7 +318,21 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
         vd_read  = hal::readVD_ActualFast(config_.adc_gain_vd);
-        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
+
+        // -- POWER SAFETY --
+        float iter_p_shunt = (vsh * vsh) / config_.rshunt;
+        if (iter_p_shunt > 1.25f) {
+            LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W during CALIB VDS iter! Aborting.", iter_p_shunt);
+            hasError_ = true;
+            char errMsg[256];
+            snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA EXCEDIDA (%.3fW) NA CALIBRACAO DE VDS!\nAlvo: %.2fV", iter_p_shunt, target_vds);
+            errorMessage_ = String(errMsg);
+            cancelled_ = true;
+            hal::shutdown();
+            return probe;
+        }
+
         vds_meas = vd_read - vsh;
         error    = target_vds - vds_meas;
 
@@ -317,7 +345,7 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 
     // Final refresh before logging failure
     vd_read  = hal::readVD_Actual(config_.adc_gain_vd);
-    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
     vds_meas = vd_read - vsh;
     error    = target_vds - vds_meas;
 
@@ -333,13 +361,27 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
 float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 {
     // Initial probe: use target + current shunt drop as better guess
-    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+    float vsh_init = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
+    
+    // NEW CHECK: Pre-calibration overpower limit
+    float p_shunt = (vsh_init * vsh_init) / config_.rshunt;
+    if (p_shunt > 1.25f) {
+        LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W during CALIB VGS! Aborting.", p_shunt);
+        hasError_ = true;
+        char errMsg[256];
+        snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA EXCEDIDA (%.3fW) NA CALIBRACAO DE VGS!\nAlvo original: %.2fV", p_shunt, target_vgs);
+        errorMessage_ = String(errMsg);
+        cancelled_ = true;
+        hal::shutdown();
+        return target_vgs;
+    }
+
     float probe = target_vgs + vsh_init;
     hal::setVGS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
     float vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
-    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+    float vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
     float vgs_meas = vg_read - vsh;
     float error    = target_vgs - vgs_meas;
 
@@ -358,7 +400,21 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
         vTaskDelay(pdMS_TO_TICKS(settling_ms));
 
         vg_read  = hal::readVG_ActualFast(config_.adc_gain_vg);
-        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh);
+        vsh      = hal::readShuntVoltageEffectiveForIdsFast(config_.adc_gain_vsh, config_.use_vsh_precise);
+
+        // -- POWER SAFETY --
+        float iter_p_shunt = (vsh * vsh) / config_.rshunt;
+        if (iter_p_shunt > 1.25f) {
+            LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W during CALIB VGS iter! Aborting.", iter_p_shunt);
+            hasError_ = true;
+            char errMsg[256];
+            snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA EXCEDIDA (%.3fW) NA CALIBRACAO DE VGS!\nAlvo: %.2fV", iter_p_shunt, target_vgs);
+            errorMessage_ = String(errMsg);
+            cancelled_ = true;
+            hal::shutdown();
+            return probe;
+        }
+
         vgs_meas = vg_read - vsh;
         error    = target_vgs - vgs_meas;
 
@@ -371,7 +427,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 
     // Final refresh before logging failure
     vg_read  = hal::readVG_Actual(config_.adc_gain_vg);
-    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+    vsh      = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
     vgs_meas = vg_read - vsh;
     error    = target_vgs - vgs_meas;
 
@@ -441,7 +497,10 @@ void MOSFETController::performSweep()
     len = snprintf(lineBuf, sizeof(lineBuf), "# Sweep Mode: %s\n", sweepVDS ? "VDS" : "VGS");
     currentFile_.write((uint8_t*)lineBuf, len);
     
-    len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n", config_.rshunt);
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n# RSHUNT=%.3f\n", config_.rshunt, config_.rshunt);
+    currentFile_.write((uint8_t*)lineBuf, len);
+
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Shunt Precision: %s\n", config_.use_vsh_precise ? "ENABLED (LM358 assisted)" : "DISABLED (Direct A0)");
     currentFile_.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# VDS Range: %.3f to %.3f V (step %.3f)\n",
@@ -489,8 +548,8 @@ void MOSFETController::performSweep()
     currentFile_.write((uint8_t*)lineBuf, len);
 
     len = snprintf(lineBuf, sizeof(lineBuf),
-                    "# Shunt: LM358_gain=%.9f | A3_DC_offset=%.6fV (sw) | Ids: A3 corrected if A3<%.2fV else A0 | PGA: %s\n",
-                    1.0f / hal::SHUNT_AMP_GAIN_INV, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
+                    "# Shunt Info: Rshunt=%.3f Ohms | LM358_gain=%.9f | A3_DC_offset=%.6fV (sw) | SwitchThreshold=%.2fV | PGA: %s\n",
+                    config_.rshunt, 1.0f / hal::SHUNT_AMP_GAIN_INV, hal::SHUNT_AMP_A3_OFFSET_V, hal::VSH_A3_IDS_SWITCH_THRESHOLD_V,
                     (config_.adc_gain_vsh == hal::ADC_GAIN_AUTO) ? "AUTO (oversampled primed by fast)" : "fixed");
     currentFile_.write((uint8_t*)lineBuf, len);
     
@@ -500,7 +559,11 @@ void MOSFETController::performSweep()
     // }
 
     // vsh=A0 (oversampled); vsh_precise=A3*gain_inv (fast); ids uses vsh_for_ids (see # Shunt line)
-    len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
+    if (sweepVDS) {
+        len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids,rds\n");
+    } else {
+        len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
+    }
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
     
@@ -512,6 +575,7 @@ void MOSFETController::performSweep()
         config_.adc_gain_vsh);
     
     int rowCount = 0;
+    int lastLoggedPercent = -1;
     
     // Temporary buffer for one curve (cleared after each outer loop iteration)
     CurveData currentCurve;
@@ -530,48 +594,73 @@ void MOSFETController::performSweep()
 
             // Calibrate VGS once at the start of this curve (differential target)
             calibrateVGS(vgs, settling);
+            if (cancelled_ || !measuring_) break;
 
             for (int i_vds = 0; i_vds < inner_steps && measuring_ && !cancelled_; i_vds++) {
                 float vds = vds_start + i_vds * vds_step;
 
                 // VDS changes every step → full differential calibration every time
                 calibrateVDS(vds, settling);
+                if (cancelled_ || !measuring_) break;
 
                 // ── Verify BOTH axes before taking the measurement ──────────
                 // VGS drift check: re-read differential and re-calibrate if needed
                 {
-                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
                     float vgs_now  = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
                     if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
                         calibrateVGS(vgs, settling);
                     }
                 }
+                if (cancelled_ || !measuring_) break;
+                
                 // VDS drift check (may have shifted after VGS re-calibration)
                 {
-                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+                    float vsh_now  = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
                     float vds_now  = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
                     if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
                         calibrateVDS(vds, settling);
                     }
                 }
+                if (cancelled_ || !measuring_) break;
 
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh);
+                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh, config_.use_vsh_precise);
                 float vsh_for_ids = sh.vsh_for_ids;
                 float vds_true  = vd_actual - vsh_for_ids;
                 float vgs_true  = vg_actual - vsh_for_ids;
                 float ids       = vsh_for_ids / rshunt;
 
-                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
+                // Potency Shunt Protection (1.25W limit: P = Vsh^2 / R)
+                float p_shunt = (vsh_for_ids * vsh_for_ids) / rshunt;
+                if (p_shunt > 1.25f) {
+                    LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W! Cancelling sweep.", p_shunt);
+                    hasError_ = true;
+                    char errMsg[256];
+                    snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA NO SHUNT EXCEDEU 1.25W!\nVDS: %.3f V\nVGS: %.3f V\nPotencia: %.3f W\nProgresso: %d%%", vds, vgs, p_shunt, progressPercent_);
+                    errorMessage_ = String(errMsg);
+                    cancelled_ = true;
+                    break;
+                }
+
+                float rds = (ids > 1e-6f) ? (vds_true / ids) : 0.0f;
+
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e,%.4f\n",
                            (unsigned long)millis(), vds, vgs,
                            vd_actual, vg_actual, sh.vsh_a0, sh.vsh_precise,
-                           vds_true, vgs_true, ids);
+                           vds_true, vgs_true, ids, rds);
 
                 rowCount++;
                 current_point++;
                 progressPercent_ = (current_point * 100) / total_points;
+
+                // Log progress to Serial every 5%
+                if (progressPercent_ >= lastLoggedPercent + 5 || progressPercent_ == 100) {
+                    LOG_INFO("[PROGRESS] %d%% (%d/%d points)", progressPercent_, current_point, total_points);
+                    lastLoggedPercent = progressPercent_;
+                }
 
                 if (rowCount % 50 == 0) {
                     currentFile_.flush();
@@ -605,30 +694,35 @@ void MOSFETController::performSweep()
 
             // Calibrate VDS once for this curve (differential target, 3× settling)
             calibrateVDS(vds, settling * 3);
+            if (cancelled_ || !measuring_) break;
 
             for (int i_vgs = 0; i_vgs < inner_steps && measuring_ && !cancelled_; i_vgs++) {
                 float vgs = vgs_start + i_vgs * vgs_step;
 
                 // VGS changes every step → full differential calibration every time
                 calibrateVGS(vgs, settling);
+                if (cancelled_ || !measuring_) break;
 
                 // ── Verify BOTH axes before taking the measurement ──────────
                 // VDS drift check: VDS may shift after VGS changes (coupling)
                 {
-                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
                     float vds_now = hal::readVD_Actual(config_.adc_gain_vd) - vsh_now;
                     if (fabsf(vds_now - vds) > VDS_GLOBAL_ERROR) {
                         calibrateVDS(vds, settling);
                     }
                 }
+                if (cancelled_ || !measuring_) break;
+
                 // VGS drift check: re-verify after VDS re-calibration
                 {
-                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh);
+                    float vsh_now = hal::readShuntVoltageEffectiveForIds(config_.adc_gain_vsh, config_.use_vsh_precise);
                     float vgs_now = hal::readVG_Actual(config_.adc_gain_vg) - vsh_now;
                     if (fabsf(vgs_now - vgs) > VGS_GLOBAL_ERROR) {
                         calibrateVGS(vgs, settling);
                     }
                 }
+                if (cancelled_ || !measuring_) break;
 
                 // Final read — both axes confirmed within tolerance
                 uint32_t t_dac  = millis();
@@ -638,13 +732,25 @@ void MOSFETController::performSweep()
                 // ── Final verification and data acquisition ──────────
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
-                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh);
+                hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh, config_.use_vsh_precise);
                 float vsh_for_ids = sh.vsh_for_ids;
 
                 float vds_true_val = vd_actual - vsh_for_ids;
                 float vgs_true_val = vg_actual - vsh_for_ids;
                 uint32_t t_done = millis();
                 float ids       = vsh_for_ids / rshunt;
+
+                // Potency Shunt Protection (1.25W limit: P = Vsh^2 / R)
+                float p_shunt = (vsh_for_ids * vsh_for_ids) / rshunt;
+                if (p_shunt > 1.25f) {
+                    LOG_ERROR("SHUNT POWER PROTECTION: %.3f W > 1.25 W! Cancelling sweep.", p_shunt);
+                    hasError_ = true;
+                    char errMsg[256];
+                    snprintf(errMsg, sizeof(errMsg), "SHUNT_POWER_ALERT\nCUIDADO: POTENCIA NO SHUNT EXCEDEU 1.25W!\nVDS: %.3f V\nVGS: %.3f V\nPotencia: %.3f W\nProgresso: %d%%", vds, vgs, p_shunt, progressPercent_);
+                    errorMessage_ = String(errMsg);
+                    cancelled_ = true;
+                    break;
+                }
 
                 // Buffer data for parameter calculation
                 currentCurve.vgs.push_back(vgs);
@@ -666,6 +772,12 @@ void MOSFETController::performSweep()
                 current_point++;
                 progressPercent_ = (current_point * 100) / total_points;
 
+                // Log progress to Serial every 5%
+                if (progressPercent_ >= lastLoggedPercent + 5 || progressPercent_ == 100) {
+                    LOG_INFO("[PROGRESS] %d%% (%d/%d points)", progressPercent_, current_point, total_points);
+                    lastLoggedPercent = progressPercent_;
+                }
+
                 if (rowCount % 50 == 1) {
                     LOG_DEBUG("[TIMING] VGS=%6.3fV | DAC=%4lums Settle=%4lums ADC=%4lums Total=%4lums | vds_true=%6.3f vgs_true=%6.3f",
                               vgs,
@@ -685,12 +797,12 @@ void MOSFETController::performSweep()
             // Calculate parameters for this curve
             calculateCurveParams(currentCurve);
 
-            currentFile_.printf("# VDS=%.3fV: Vt_Gm=%.3fV, Vt_SS=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S, SS_Tangent_VGS:%.3f,%.3f SS_Tangent_LogId:%.3f,%.3f\n",
-                       vds, currentCurve.vt_gm, currentCurve.vt_ss, currentCurve.ss, currentCurve.max_gm,
+            currentFile_.printf("# VDS=%.3fV: Vt_Gm=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S, SS_Tangent_VGS:%.3f,%.3f SS_Tangent_LogId:%.3f,%.3f\n",
+                       vds, currentCurve.vt_gm, currentCurve.ss, currentCurve.max_gm,
                        currentCurve.ss_x1, currentCurve.ss_x2, currentCurve.ss_y1, currentCurve.ss_y2);
 
             currentFile_.flush();
-            LOG_INFO("VDS=%6.3fV: Vt_Gm=%6.3f, Vt_SS=%6.3f, SS=%6.1f mV/dec, MaxGm=%8.2e", vds, currentCurve.vt_gm, currentCurve.vt_ss, currentCurve.ss, currentCurve.max_gm);
+            LOG_INFO("VDS=%6.3fV: Vt_Gm=%6.3f, SS=%6.1f mV/dec, MaxGm=%8.2e", vds, currentCurve.vt_gm, currentCurve.ss, currentCurve.max_gm);
         }
     }
     
@@ -743,10 +855,8 @@ void MOSFETController::calculateCurveParams(CurveData& curve) {
         curve.ss_y1 = ssResult.y1;
         curve.ss_x2 = ssResult.x2;
         curve.ss_y2 = ssResult.y2;
-        curve.vt_ss = ssResult.vt_ss;  // 0 if not computable
     } else {
         curve.ss = 0.0f;
-        curve.vt_ss = 0.0f;
     }
 }
 
@@ -804,7 +914,10 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
         timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
-    len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.2f Ohms\n", config_.rshunt);
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Rshunt: %.3f Ohms\n# RSHUNT=%.3f\n", config_.rshunt, config_.rshunt);
+    totalWritten += file.write((uint8_t*)lineBuf, len);
+    
+    len = snprintf(lineBuf, sizeof(lineBuf), "# Shunt Precision: %s\n", config_.use_vsh_precise ? "ENABLED (LM358 assisted)" : "DISABLED (Direct A0)");
     totalWritten += file.write((uint8_t*)lineBuf, len);
     
     len = snprintf(lineBuf, sizeof(lineBuf), "# VDS Range: %.2f to %.2f V (step %.2f)\n",
@@ -823,8 +936,8 @@ void MOSFETController::writeEnhancedCSV(const std::vector<CurveData>& results) {
     
     // Write summary per curve
     for(const auto& res : results) {
-        len = snprintf(lineBuf, sizeof(lineBuf), "# VDS=%.2fV Vt_Gm=%.3fV Vt_SS=%.3fV SS=%.2f mV/dec MaxGm=%.3e S\n", 
-            res.vds, res.vt_gm, res.vt_ss, res.ss, res.max_gm);
+        len = snprintf(lineBuf, sizeof(lineBuf), "# VDS=%.2fV Vt_Gm=%.3fV SS=%.2f mV/dec MaxGm=%.3e S\n", 
+            res.vds, res.vt_gm, res.ss, res.max_gm);
         totalWritten += file.write((uint8_t*)lineBuf, len);
     }
     

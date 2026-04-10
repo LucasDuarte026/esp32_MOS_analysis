@@ -62,6 +62,7 @@ struct SweepConfig {
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
     SweepMode sweep_mode = SWEEP_VGS; ///< Which axis drives the inner loop
+    bool use_vsh_precise = true; ///< true = blend A3 (amp) for low Ids; false = A0 only
 };
 
 // ----------------------------------------------------------------------------
@@ -192,7 +193,6 @@ private:
     struct CurveData {
         float vds;      ///< Fixed VDS for this curve (V)
         float vt_gm;    ///< Threshold voltage via peak-Gm extrapolation (V)
-        float vt_ss;    ///< Threshold voltage via SS tangent intercept at 100nA (V)
         float ss;       ///< Subthreshold swing (mV/decade)
         float max_gm;   ///< Peak transconductance (S)
         float rshunt;   ///< Rshunt passed in for downstream validity checks

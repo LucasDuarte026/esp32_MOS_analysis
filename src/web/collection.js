@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.value = parseFloat(cfg.ext_dac_vref).toFixed(1);
             }
         })
-        .catch(() => {}); // Silently ignore if offline or first boot
+        .catch(() => { }); // Silently ignore if offline or first boot
 });
 
 // =============================================================================
@@ -129,6 +129,19 @@ document.addEventListener('DOMContentLoaded', () => {
             errorMsg += `- Tensão MCP4725 fora da faixa (${extDacVref.toFixed(1)}V). Use entre 4.0V e 5.5V\n`;
         }
 
+        // Automatically swap start/end if inverted
+        let vgs_s = vgsStart, vgs_e = vgsEnd;
+        if (vgs_s > vgs_e) {
+            [vgs_s, vgs_e] = [vgs_e, vgs_s];
+            console.log(`VGS range swapped: ${vgs_s} to ${vgs_e}V`);
+        }
+
+        let vds_s = vdsStart, vds_e = vdsEnd;
+        if (vds_s > vds_e) {
+            [vds_s, vds_e] = [vds_e, vds_s];
+            console.log(`VDS range swapped: ${vds_s} to ${vds_e}V`);
+        }
+
         if (errorMsg) {
             console.warn("Validation failed:", errorMsg);
             alert('⚠️ Erro na configuração:\n' + errorMsg);
@@ -155,17 +168,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const adcGainVshEl = document.getElementById('adc-gain-vsh');
         const adcGainVdEl = document.getElementById('adc-gain-vd');
         const adcGainVgEl = document.getElementById('adc-gain-vg');
-        
+
         const adcGainVsh = adcGainVshEl ? parseInt(adcGainVshEl.value) : 255;  // Auto default
         const adcGainVd = adcGainVdEl ? parseInt(adcGainVdEl.value) : 255;     // Auto default
         const adcGainVg = adcGainVgEl ? parseInt(adcGainVgEl.value) : 255;     // Auto default
 
         const config = {
-            vgs_start: vgsStart,
-            vgs_end: vgsEnd,
+            vgs_start: vgs_s,
+            vgs_end: vgs_e,
             vgs_step: vgsStep,
-            vds_start: vdsStart,
-            vds_end: vdsEnd,
+            vds_start: vds_s,
+            vds_end: vds_e,
             vds_step: vdsStep,
             rshunt: rshunt,
             settling_ms: (settlingTime === 0 || settlingTime > 0) ? settlingTime : 0,
@@ -177,7 +190,8 @@ document.addEventListener('DOMContentLoaded', () => {
             use_external_hw: useExternalHW,
             filename: filename || 'mosfet_data.csv',
             sweep_mode: sweepMode,
-            timestamp: Math.floor(Date.now() / 1000)
+            timestamp: Math.floor(Date.now() / 1000),
+            use_vsh_precise: document.getElementById('precision-toggle')?.checked === false // default checked is false (meaning precision ON)
         };
 
         try {
@@ -286,9 +300,15 @@ async function pollProgress() {
         } else {
             // Finished - check for errors first
             if (data.error && data.error_msg) {
-                showToast("❌ ERRO: " + data.error_msg, "error");
+                if (data.error_msg.includes('SHUNT_POWER_ALERT')) {
+                    const cleanMsg = data.error_msg.replace('SHUNT_POWER_ALERT\\n', '');
+                    alert(cleanMsg);
+                    showToast("❌ PROTEÇÃO: Potência no Shunt excedida!", "error");
+                } else {
+                    showToast("❌ ERRO: " + data.error_msg, "error");
+                }
                 if (progressSection) {
-                    document.getElementById('progress-text').textContent = "ERRO: " + data.error_msg;
+                    document.getElementById('progress-text').textContent = "ERRO: " + (data.error_msg.includes('SHUNT_POWER_ALERT') ? "Potência Shunt!" : data.error_msg);
                     document.getElementById('progress-fill').style.backgroundColor = '#f44336';
                 }
             } else if (data.progress >= 100) {
@@ -355,10 +375,10 @@ document.getElementById('btn-reset-fields')?.addEventListener('click', () => {
     // Hardware ADC Gains
     const adcGainVshEl = document.getElementById('adc-gain-vsh');
     if (adcGainVshEl) adcGainVshEl.value = "255"; // Auto default
-    
+
     const adcGainVdEl = document.getElementById('adc-gain-vd');
     if (adcGainVdEl) adcGainVdEl.value = "255"; // Auto default
-    
+
     const adcGainVgEl = document.getElementById('adc-gain-vg');
     if (adcGainVgEl) adcGainVgEl.value = "255"; // Auto default
 });
@@ -460,6 +480,25 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
 
 // Oversampling Factor dropdown — update time hint
 (function () {
+    // Shunt Precision Toggle - visual update
+    document.getElementById('precision-toggle')?.addEventListener('change', (e) => {
+        const onLabel = document.getElementById('precision-on-label');
+        const offLabel = document.getElementById('precision-off-label');
+        if (e.target.checked) {
+            // "Sem Precisão" (Checked)
+            onLabel.classList.remove('mode-active');
+            onLabel.classList.add('mode-dimmed');
+            offLabel.classList.remove('mode-dimmed');
+            offLabel.classList.add('mode-active');
+        } else {
+            // "Com Precisão" (Unchecked)
+            onLabel.classList.add('mode-active');
+            onLabel.classList.remove('mode-dimmed');
+            offLabel.classList.add('mode-dimmed');
+            offLabel.classList.remove('mode-active');
+        }
+    });
+
     // ADS1115 at 860 SPS ≈ 1.16 ms/sample; ESP32 internal ≈ 0.015 ms/sample
     const ADS1115_MS_PER_SAMPLE = 1.16;
     const INTERNAL_MS_PER_SAMPLE = 0.015;
@@ -484,12 +523,12 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
 (function () {
     // FSR and resolution (62500 µV / 32767 LSB) per gain code
     const GAIN_INFO = {
-          0: { fsr: '6.144', res: '187.5' },
-          1: { fsr: '4.096', res: '125.0' },
-          2: { fsr: '2.048', res:  '62.5' },
-          4: { fsr: '1.024', res:  '31.3' },
-          8: { fsr: '0.512', res:  '15.6' },
-         16: { fsr: '0.256', res:   '7.8' },
+        0: { fsr: '6.144', res: '187.5' },
+        1: { fsr: '4.096', res: '125.0' },
+        2: { fsr: '2.048', res: '62.5' },
+        4: { fsr: '1.024', res: '31.3' },
+        8: { fsr: '0.512', res: '15.6' },
+        16: { fsr: '0.256', res: '7.8' },
     };
     function updateGainHint() {
         const selVsh = document.getElementById('adc-gain-vsh');
@@ -497,15 +536,15 @@ document.getElementById('oversampling-toggle')?.addEventListener('change', (e) =
         const selVg = document.getElementById('adc-gain-vg');
         const hint = document.getElementById('gain-hint');
         if (!selVsh && !selVd && !selVg || !hint) return;
-        
+
         // We just display the highest required range for the hint (lowest gain code)
         let minGain = 255; // default Auto
-        
+
         let hasFixed = false;
         if (selVsh && selVsh.value !== "255") { minGain = Math.min(minGain, parseInt(selVsh.value)); hasFixed = true; }
-        if (selVd && selVd.value !== "255")   { minGain = Math.min(minGain, parseInt(selVd.value)); hasFixed = true; }
-        if (selVg && selVg.value !== "255")   { minGain = Math.min(minGain, parseInt(selVg.value)); hasFixed = true; }
-        
+        if (selVd && selVd.value !== "255") { minGain = Math.min(minGain, parseInt(selVd.value)); hasFixed = true; }
+        if (selVg && selVg.value !== "255") { minGain = Math.min(minGain, parseInt(selVg.value)); hasFixed = true; }
+
         if (!hasFixed) {
             hint.textContent = "FSR: Ajuste Automático em Tempo Real (Otimizado)";
         } else {

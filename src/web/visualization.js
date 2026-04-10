@@ -272,23 +272,34 @@ function parseCSV(csvText) {
         // ... rest of metadata scan ...
         if (line.startsWith('# VDS=')) {
             try {
-                const vdsMatch = line.match(/VDS=([\d\.]+)V/);
                 const vtGmMatch = line.match(/Vt_Gm=([\d\.]+)V/);
-                const vtSsMatch = line.match(/Vt_SS=([\d\.]+)V/);
                 const ssMatch = line.match(/SS=([0-9\.]+)\s?mV\/dec/);
                 const gmMatch = line.match(/MaxGm=([0-9\.eE\-\+]+)\s?S/);
-                
+                const ssTangentVgsMatch = line.match(/SS_Tangent_VGS:([\d\.\-]+),([\d\.\-]+)/);
+                const ssTangentLogIdMatch = line.match(/SS_Tangent_LogId:([\d\.\-]+),([\d\.\-]+)/);
+
                 if (vdsMatch) {
                     const vdsVal = parseFloat(vdsMatch[1]);
                     const vdsKey = Math.round(vdsVal * 1000) / 1000;
+
+                    let ssTangent = null;
+                    if (ssTangentVgsMatch && ssTangentLogIdMatch) {
+                        ssTangent = {
+                            x1: parseFloat(ssTangentVgsMatch[1]),
+                            x2: parseFloat(ssTangentVgsMatch[2]),
+                            y1: parseFloat(ssTangentLogIdMatch[1]),
+                            y2: parseFloat(ssTangentLogIdMatch[2])
+                        };
+                    }
+
                     analysisMap[vdsKey] = {
                         vt_gm: vtGmMatch ? parseFloat(vtGmMatch[1]) : 0,
-                        vt_ss: vtSsMatch ? parseFloat(vtSsMatch[1]) : 0,
                         ss: ssMatch ? parseFloat(ssMatch[1]) : 0,
-                        max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0
+                        max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0,
+                        ssTangent: ssTangent
                     };
                 }
-            } catch(e) {}
+            } catch (e) { }
         }
     }
 
@@ -303,7 +314,7 @@ function parseCSV(csvText) {
         const parts = line.split(',');
         if (parts.length < 5) continue;
 
-        let vds, vgs, vsh, vsh_precise, ids, gm=0, vd_read, vg_read, vds_true, vgs_true;
+        let vds, vgs, vsh, vsh_precise, ids, gm = 0, vd_read, vg_read, vds_true, vgs_true;
 
         // Dynamic mapping based on detected indices
         vds = parseFloat(parts[colMap.vds || colMap.vd || colMap.vds_sent || 1]);
@@ -322,7 +333,6 @@ function parseCSV(csvText) {
 
         // Legacy format fallback for Vt/SS (no longer stored per-row in new format)
         let vt_gm = 0;
-        let vt_ss = 0;
         let ss = 0;
 
         if (!isNaN(vds_true) && !isNaN(vgs_true)) {
@@ -338,7 +348,6 @@ function parseCSV(csvText) {
             // Look up backend-computed metadata by the commanded VDS key
             if (analysisMap[vdsRounded]) {
                 vt_gm = analysisMap[vdsRounded].vt_gm;
-                vt_ss = analysisMap[vdsRounded].vt_ss;
                 ss = analysisMap[vdsRounded].ss;
             }
 
@@ -355,7 +364,6 @@ function parseCSV(csvText) {
                 vgs_true: vgsTrueRounded,  // true terminal VGS (for plot x-axis)
                 r_shunt: rShunt,           // Store for later trace calculation
                 vt_gm: vt_gm,
-                vt_ss: vt_ss,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
             });
@@ -513,7 +521,7 @@ function updatePlotsMultiCurve() {
     // Colors — primary trace: Ids (cyan)
     const colors = {
         ids: '#00BCD4',
-        gm: '#FF9800', ss: '#AB47BC', vt_gm: '#4CAF50', vt_ss: '#FFEB3B', tangent: '#E91E63'
+        gm: '#FF9800', ss: '#F44336', vt_gm: '#4CAF50', tangent: '#E91E63'
     };
 
     // ── Filter Data ─────────────────────────────────────────────────────────
@@ -588,21 +596,6 @@ function updatePlotsMultiCurve() {
                         showarrow: false, yanchor: 'bottom', font: { color: colors.vt_gm }
                     });
                 }
-                
-                // Vth SS
-                if (meta.vt_ss > 0) {
-                    shapes.push({
-                        type: 'line',
-                        x0: meta.vt_ss, y0: 0, x1: meta.vt_ss, y1: 1,
-                        xref: 'x', yref: 'paper',
-                        line: { color: colors.vt_ss, width: 2, dash: 'dot' }
-                    });
-                    annotations.push({
-                        x: meta.vt_ss, y: 0.95, xref: 'x', yref: 'paper', // Offset slightly to avoid overlap
-                        text: `SS: ${meta.vt_ss.toFixed(2)}V`,
-                        showarrow: false, yanchor: 'bottom', font: { color: colors.vt_ss }
-                    });
-                }
             }
 
             // SS tangent (log scale only)
@@ -661,14 +654,12 @@ function updatePlotsMultiCurve() {
 
 function updateMetrics(plotData, meta) {
     const vtGmEl = document.getElementById('metric-vt-gm');
-    const vtSsEl = document.getElementById('metric-vt-ss');
     const gmEl = document.getElementById('metric-gm');
     const ssEl = document.getElementById('metric-ss');
 
     if (currentSweepMode === 'VDS') {
         const msg = "N/A";
         if (vtGmEl) vtGmEl.textContent = msg;
-        if (vtSsEl) vtSsEl.textContent = msg;
         if (gmEl) gmEl.textContent = msg;
         if (ssEl) ssEl.textContent = msg;
         return;
@@ -677,7 +668,6 @@ function updateMetrics(plotData, meta) {
     // Use metadata if available, else calc
     if (meta) {
         if (vtGmEl) vtGmEl.textContent = meta.vt_gm ? `${meta.vt_gm.toFixed(3)} V` : '-';
-        if (vtSsEl) vtSsEl.textContent = meta.vt_ss ? `${meta.vt_ss.toFixed(3)} V` : '-';
         if (gmEl) gmEl.textContent = meta.max_gm ? `${(meta.max_gm * 1000).toFixed(3)} mS` : '-';
         if (ssEl) ssEl.textContent = meta.ss ? `${meta.ss.toFixed(1)} mV/dec` : '-';
     } else {

@@ -1,7 +1,7 @@
 #pragma once
 
-#define VERSION_MAJOR 10
-#define VERSION_MINOR 2
-#define VERSION_SNAPSHOT 8
+#define VERSION_MAJOR 11
+#define VERSION_MINOR 0
+#define VERSION_SNAPSHOT 1
 
-#define SOFTWARE_VERSION "10.2.8"
+#define SOFTWARE_VERSION "11.0.1"
