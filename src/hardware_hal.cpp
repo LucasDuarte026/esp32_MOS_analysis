@@ -636,7 +636,7 @@ float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode, bool usePre
     }
     if (usePrecise) {
         // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
-        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
         if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
             return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
         }
@@ -652,7 +652,7 @@ float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode, bool us
     }
     if (usePrecise) {
         // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
-        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
         if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
             return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
         }
@@ -672,11 +672,19 @@ ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode, bool usePrecise) {
         return s;
     }
     // A3 then A0: each read uses its own lastAutoGain_[ch] when gainCode == ADC_GAIN_AUTO
-    s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    // A3 ALWAYS uses auto-gain (255) for maximum precision
+    s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
     s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
     s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
     if (usePrecise) {
-        s.vsh_for_ids = (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) ? s.vsh_a0 : s.vsh_precise;
+        // High-end: If LM358 is saturated, use Direct A0
+        if (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            s.vsh_for_ids = s.vsh_a0;
+        } 
+        // Standard Operation: Use Precision channel exclusively (trust the noise floor)
+        else {
+            s.vsh_for_ids = s.vsh_precise;
+        }
     } else {
         s.vsh_for_ids = s.vsh_a0;
     }

@@ -119,7 +119,43 @@ async function handleFileSelection(e) {
         const response = await fetch(`/api/files/download?file=${encodeURIComponent(selectedFile)}&t=${Date.now()}`);
         if (!response.ok) throw new Error('Falha ao baixar arquivo');
 
-        const csvText = await response.text();
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length');
+        let receivedLength = 0;
+        let chunks = [];
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            receivedLength += value.length;
+
+            if (vdsSelect) {
+                if (contentLength) {
+                    const percent = ((receivedLength / contentLength) * 100).toFixed(0);
+                    vdsSelect.innerHTML = `<option value="">⏳ Baixando: ${percent}%</option>`;
+                } else {
+                    const kb = (receivedLength / 1024).toFixed(1);
+                    vdsSelect.innerHTML = `<option value="">⏳ Baixando... ${kb} KB</option>`;
+                }
+            }
+        }
+
+        if (vdsSelect) {
+            vdsSelect.innerHTML = '<option value="">⏳ Processando dados...</option>';
+        }
+
+        // Give UI a moment to paint the processing message
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        let chunksAll = new Uint8Array(receivedLength);
+        let position = 0;
+        for (let chunk of chunks) {
+            chunksAll.set(chunk, position);
+            position += chunk.length;
+        }
+
+        const csvText = new TextDecoder("utf-8").decode(chunksAll);
         dbg('API', `File content received (${csvText.length} bytes)`);
 
         parseCSV(csvText);
@@ -272,6 +308,7 @@ function parseCSV(csvText) {
         // ... rest of metadata scan ...
         if (line.startsWith('# VDS=')) {
             try {
+                const vdsMatch = line.match(/# VDS=([\d\.]+)/);
                 const vtGmMatch = line.match(/Vt_Gm=([\d\.]+)V/);
                 const ssMatch = line.match(/SS=([0-9\.]+)\s?mV\/dec/);
                 const gmMatch = line.match(/MaxGm=([0-9\.eE\-\+]+)\s?S/);
@@ -644,7 +681,7 @@ function updatePlotsMultiCurve() {
         font: { color: '#e0e0e0' }
     };
 
-    Plotly.newPlot('plot-container', traces, layout);
+    Plotly.react('plot-container', traces, layout);
 
     // Update metrics panel (only relevant in VGS mode)
     const vdsKey = !isVDSMode ? Math.round(curveVal * 1000) / 1000 : null;

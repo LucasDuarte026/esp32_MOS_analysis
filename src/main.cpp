@@ -30,6 +30,8 @@ extern "C"
 #include "freertos/semphr.h"
 }
 
+MOSFETController mosfet_controller;
+
 namespace
 {
 constexpr uint8_t LED_PIN = 2;
@@ -39,8 +41,6 @@ Preferences prefs;
 
 // ESPAsyncWebServer - Non-blocking!
 AsyncWebServer server(80);
-MOSFETController mosfet_controller;
-
 // ============================================================================
 // CORS Headers Helper (Async version)
 // ============================================================================
@@ -381,7 +381,9 @@ void handleSystemInfo(AsyncWebServerRequest *request)
   json += "\"usb_connected\":" + String(status.usb_connected ? "true" : "false") + ",";
   json += "\"free_heap\":" + String(status.free_heap) + ",";
   json += "\"debug_mode\":" + String(debug_mode::isEnabled() ? "true" : "false") + ",";
-  json += "\"storage_percent\":" + String((int)(status.storage_percent * 100));
+  json += "\"storage_percent\":" + String((int)(status.storage_percent * 100)) + ",";
+  json += "\"storage_total\":" + String(status.storage_total) + ",";
+  json += "\"storage_used\":" + String(status.storage_used);
   json += "}";
   
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);

@@ -20,24 +20,33 @@ async function loadMeasurementList() {
     try {
         const response = await fetch(`/api/files?t=${Date.now()}`);
         const data = await response.json();
-
-        select.innerHTML = '<option value="">-- Selecione uma medida --</option>';
-
+        
         const sortedFiles = data.files.slice().reverse();
-        sortedFiles.forEach(file => {
-            const option = document.createElement('option');
-            option.value = file.name;
-            const date = new Date(file.timestamp * 1000).toLocaleString('pt-BR');
-            option.textContent = `${file.name.replace('.csv', '')} (${date})`;
-            select.appendChild(option);
-        });
+        
+        // Smart DOM Update: Only rebuild if the file list actually changed
+        // We compare the number of options (minus 1 for the placeholder) and the newest file name
+        const currentCount = select.options.length - 1;
+        const hasDifferences = currentCount !== sortedFiles.length || 
+                              (sortedFiles.length > 0 && currentCount > 0 && select.options[1].value !== sortedFiles[0].name);
 
-        // Restore previous selection if it still exists
-        if (previousSelection && [...select.options].some(opt => opt.value === previousSelection)) {
-            select.value = previousSelection;
+        if (hasDifferences) {
+            select.innerHTML = '<option value="">-- Selecione uma medida --</option>';
+
+            sortedFiles.forEach(file => {
+                const option = document.createElement('option');
+                option.value = file.name;
+                const date = new Date(file.timestamp * 1000).toLocaleString('pt-BR');
+                option.textContent = `${file.name.replace('.csv', '')} (${date})`;
+                select.appendChild(option);
+            });
+
+            // Restore previous selection if it still exists
+            if (previousSelection && [...select.options].some(opt => opt.value === previousSelection)) {
+                select.value = previousSelection;
+            }
         }
 
-        if (data.warning) {
+        if (data.warning && hasDifferences) {
             console.warn(`⚠️ ${data.count}/200 arquivos armazenados`);
         }
     } catch (error) {

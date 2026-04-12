@@ -116,6 +116,12 @@ bool MOSFETController::startMeasurementAsync(const SweepConfig& config)
         return false;
     }
     
+    // Check file count and clear old files to prevent FFat directory saturation
+    if (FileManager::countFiles() >= FileManager::MAX_FILES) {
+        LOG_WARN("Max files reached! Attempting to delete the oldest measurement...");
+        FileManager::deleteOldestFile();
+    }
+    
     LOG_INFO("Generated filename: %s", currentFilename_.c_str());
     
     measuring_ = true;
@@ -160,46 +166,48 @@ void MOSFETController::measurementTaskWrapper(void* param)
     if (controller) {
         controller->performSweep();
         
-        // CRITICAL: Close file ONLY here, after sweep is fully complete
+        // CRITICAL CLEANUP:
+        // The task is the SOLE owner of the currentFile_ handle during the sweep.
+        // It must close the file here, whether the sweep finished normally or was cancelled.
+        String fileToDelete = "";
+        if (controller->cancelled_) {
+            fileToDelete = controller->currentFilename_;
+        }
+        
         controller->closeMeasurementFile();
         
-        // Clean up
+        if (!fileToDelete.isEmpty()) {
+            vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay to ensure handle is released
+            if (FileManager::deleteFile(fileToDelete)) {
+                LOG_INFO("Deleted incomplete/cancelled file: %s", fileToDelete.c_str());
+            }
+        }
+        
+        // Final state reset
         controller->measuring_ = false;
         controller->taskHandle_ = nullptr;
         
         // Return LED to standby pattern
         led_status::setState(led_status::State::STANDBY);
         
-        LOG_INFO("Async Measurement Task Finished");
+        LOG_INFO("Async Measurement Task Finished%s", controller->cancelled_ ? " (CANCELLED)" : "");
     }
     vTaskDelete(nullptr);
 }
 
 void MOSFETController::cancelMeasurement() {
     if (!measuring_) {
-        LOG_WARN("No measurement to cancel");
+        LOG_DEBUG("cancelMeasurement: No active measurement to cancel.");
         return;
     }
     
-    cancelled_ = true;
-    LOG_WARN("Cancelling measurement...");
-    
-    // Wait a bit for the task to notice
-    vTaskDelay(pdMS_TO_TICKS(200));
-    
-    // Close and delete the incomplete file
-    closeMeasurementFile();
-    
-    // Delete the partial file
-    if (!currentFilename_.isEmpty()) {
-        bool deleted = FileManager::deleteFile(currentFilename_);
-        if (deleted) {
-            LOG_INFO("Deleted incomplete file: %s", currentFilename_.c_str());
-        }
+    if (cancelled_) {
+        LOG_DEBUG("cancelMeasurement: Already in cancelling state.");
+        return;
     }
-    
-    measuring_ = false;
-    LOG_INFO("Measurement cancelled");
+
+    cancelled_ = true;
+    LOG_WARN("Cancellation requested by UI. Signalling task to stop...");
 }
 
 bool MOSFETController::startMeasurement(const SweepConfig& config)
@@ -294,6 +302,8 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
         return target_vds;
     }
 
+    if (cancelled_) return target_vds; // Early abort
+
     float probe = target_vds + vsh_init;
     hal::setVDS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
@@ -309,7 +319,7 @@ float MOSFETController::calibrateVDS(float target_vds, int settling_ms)
     }
 
     // Slow path: iterative correction on VDS differential
-    for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
+    for (int iter = 1; iter < DAC_CALIB_MAX_ITER && !cancelled_; iter++) {
         probe += error;  // nudge DAC probe toward target
         if (probe < 0.0f) probe = 0.0f;
         if (probe > hal::EXT_DAC_VREF) probe = hal::EXT_DAC_VREF;
@@ -376,6 +386,8 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
         return target_vgs;
     }
 
+    if (cancelled_) return target_vgs; // Early abort
+
     float probe = target_vgs + vsh_init;
     hal::setVGS(probe);
     vTaskDelay(pdMS_TO_TICKS(settling_ms));
@@ -391,7 +403,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
     }
 
     // Slow path: iterative correction on VGS differential
-    for (int iter = 1; iter < DAC_CALIB_MAX_ITER; iter++) {
+    for (int iter = 1; iter < DAC_CALIB_MAX_ITER && !cancelled_; iter++) {
         probe += error;
         if (probe < 0.0f) probe = 0.0f;
         if (probe > hal::EXT_DAC_VREF) probe = hal::EXT_DAC_VREF;
@@ -420,7 +432,7 @@ float MOSFETController::calibrateVGS(float target_vgs, int settling_ms)
 
         if (fabsf(error) <= VGS_GLOBAL_ERROR) {
             LOG_DEBUG("[CALIB VGS] target=%6.3f converged in %2d iter(s), probe=%6.3f vgs_meas=%7.4f err=%+7.4f",
-                      target_vgs, iter + 1, probe, vgs_meas, error);
+                       target_vgs, iter + 1, probe, vgs_meas, error);
             return probe;
         }
     }
@@ -562,7 +574,7 @@ void MOSFETController::performSweep()
     if (sweepVDS) {
         len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids,rds\n");
     } else {
-        len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids\n");
+        len = snprintf(lineBuf, sizeof(lineBuf), "#\ntimestamp,vd,vg,vd_read,vg_read,vsh,vsh_precise,vds_true,vgs_true,ids,gm\n");
     }
     currentFile_.write((uint8_t*)lineBuf, len);
     currentFile_.flush();
@@ -649,7 +661,7 @@ void MOSFETController::performSweep()
 
                 currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e,%.4f\n",
                            (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, sh.vsh_a0, sh.vsh_precise,
+                           vd_actual, vg_actual, sh.vsh_a0, sh.raw_a3,
                            vds_true, vgs_true, ids, rds);
 
                 rowCount++;
@@ -756,17 +768,12 @@ void MOSFETController::performSweep()
                 currentCurve.vgs.push_back(vgs);
                 currentCurve.ids.push_back(ids);
                 currentCurve.vsh.push_back(sh.vsh_a0);
+                currentCurve.vsh_precise.push_back(sh.vsh_precise);
                 currentCurve.vd_read.push_back(vd_actual);
                 currentCurve.vg_read.push_back(vg_actual);
                 currentCurve.vds_true.push_back(vds_true_val);
                 currentCurve.vgs_true.push_back(vgs_true_val);
-                currentCurve.vsh_precise.push_back(sh.vsh_precise);
                 currentCurve.timestamps.push_back(millis());
-
-                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e\n",
-                           (unsigned long)millis(), vds, vgs,
-                           vd_actual, vg_actual, sh.vsh_a0, sh.vsh_precise,
-                           vds_true_val, vgs_true_val, ids);
 
                 rowCount++;
                 current_point++;
@@ -796,6 +803,21 @@ void MOSFETController::performSweep()
 
             // Calculate parameters for this curve
             calculateCurveParams(currentCurve);
+
+            for (size_t k = 0; k < currentCurve.ids.size(); k++) {
+                currentFile_.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.6f,%.6f,%.4f,%.4f,%.6e,%.6e\n",
+                           (unsigned long)currentCurve.timestamps[k],
+                           currentCurve.vds,
+                           currentCurve.vgs[k],
+                           currentCurve.vd_read[k],
+                           currentCurve.vg_read[k],
+                           currentCurve.vsh[k],
+                           currentCurve.vsh_precise[k],
+                           currentCurve.vds_true[k],
+                           currentCurve.vgs_true[k],
+                           currentCurve.ids[k],
+                           currentCurve.gm.empty() ? 0.0f : currentCurve.gm[k]);
+            }
 
             currentFile_.printf("# VDS=%.3fV: Vt_Gm=%.3fV, SS=%.2f mV/dec, MaxGm=%.2e S, SS_Tangent_VGS:%.3f,%.3f SS_Tangent_LogId:%.3f,%.3f\n",
                        vds, currentCurve.vt_gm, currentCurve.ss, currentCurve.max_gm,

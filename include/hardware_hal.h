@@ -158,18 +158,16 @@ constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // A3: Amplified shunt (via LM358)
 #endif
 
 // ── LM358 Amplified Shunt Parameters (A3: vsh_precise = f(raw_a3_volts)) ──
-// The LM358 amplifies the shunt voltage ×31.49 before the ADS1115 A3 input.
-// Theoretical gain: 31.486322188  (non-inverting: 1 + R2/R1)
-// Saturation: ~3.77 V output → trust readings up to 3.70 V max.
-constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.486322188f;
+// The LM358 amplifies the shunt voltage before the ADS1115 A3 input.
+// Measured Calibration (2026-04-12, 992R test): Gain = 31.434663, Offset = -9.88 mV
+// Note: 992R result used instead of 1R to avoid ground-drift errors at high currents.
+constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.434663f;
 
 /**
  * DC offset (V) subtracted from the RAW A3 voltage BEFORE dividing by gain.
  * This represents the LM358 output offset (input offset * gain).
- * Measured absolute pre-conversion offset at A3 pin: 58.2 mV.
- * Set to 0.f to disable. 
  */
-constexpr float    SHUNT_AMP_A3_OFFSET_V = 0.0582f;
+constexpr float    SHUNT_AMP_A3_OFFSET_V = -0.009884f;
 
 /** If A3 ADC voltage (before ÷ gain) is >= this, use A0 direct shunt for Ids
  *  (LM358 saturates at ~3.77 V; we switch at 3.70 V for safety margin). */
@@ -177,10 +175,10 @@ constexpr float    VSH_A3_IDS_SWITCH_THRESHOLD_V = 3.70f;
 
 /** A3 ADC pin (V) → shunt-equivalent (V): − offset, then ÷ LM358 gain. */
 inline float shuntAmplifiedAdcToVoltage(float raw_a3_volts) {
-    if (raw_a3_volts > SHUNT_AMP_A3_OFFSET_V) {
-        return (raw_a3_volts - SHUNT_AMP_A3_OFFSET_V) * SHUNT_AMP_GAIN_INV;
-    }
-    return 0.f;
+    // Note: We no longer clip to 0.f here to allow negative-going noise
+    // to be averaged correctly in the math engine and to allow fallback
+    // logic to detect when the amplifier is in the floor.
+    return (raw_a3_volts - SHUNT_AMP_A3_OFFSET_V) * SHUNT_AMP_GAIN_INV;
 }
 
 /** PGA code 255 = auto-range per ADS1115 channel (independent lastAutoGain_[ch]). */
