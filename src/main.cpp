@@ -139,7 +139,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   config.filename = String(fname);
   
   config.vds_start = doc["vds_start"] | 0.0f;
-  config.vds_end = doc["vds_end"] | 5.0f;
+  config.vds_end = doc["vds_end"] | 5.12f;
   config.vds_step = doc["vds_step"] | 0.05f;
   
   const char* sweepModeStr = doc["sweep_mode"] | "VGS";
@@ -173,7 +173,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   config.adc_gain_vg  = (uint8_t)(doc["adc_gain_vg"]  | 255);  // default: Auto
 
   // Parse ext_dac_vref from request or fall back to NVS-stored value
-  float extDacVref = doc["ext_dac_vref"] | 5.0f;
+  float extDacVref = doc["ext_dac_vref"] | 5.12f;
   if (doc.containsKey("ext_dac_vref")) {
     // Validate range 4.0 - 5.5 V
     if (extDacVref < 4.0f || extDacVref > 5.5f) {
@@ -241,7 +241,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32 dual DAC + ADC)");
   
   // Validate
-  if (config.vgs_start < 0 || config.vgs_end > 5.0) {
+  if (config.vgs_start < 0 || config.vgs_end > 5.12) {
     AsyncWebServerResponse *response = request->beginResponse(400, "application/json",
       "{\"error\":\"invalid_vgs_range\"}");
     addCORSHeaders(response);
@@ -647,10 +647,10 @@ void handleEmailStatus(AsyncWebServerRequest *request)
 void handleGetConfig(AsyncWebServerRequest *request)
 {
   prefs.begin("config", true); // read-only
-  float vref = prefs.getFloat("ext_dac_vref", 5.0f);
+  float vref = prefs.getFloat("ext_dac_vref", 5.12f);
   prefs.end();
 
-  String json = "{\"ext_dac_vref\":" + String(vref, 2) + "}";
+  String json = "{\"ext_dac_vref\":" + String(vref, 3) + "}";
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
   response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   addCORSHeaders(response);
@@ -686,9 +686,9 @@ void setup()
   // Load persisted config from NVS and apply to HAL
   prefs.begin("config", false); // Open in read-write to ensure namespace exists
   if (!prefs.isKey("ext_dac_vref")) {
-    prefs.putFloat("ext_dac_vref", 5.0f);
+    prefs.putFloat("ext_dac_vref", 5.12f);
   }
-  float storedVref = prefs.getFloat("ext_dac_vref", 5.0f);
+  float storedVref = prefs.getFloat("ext_dac_vref", 5.12f);
   prefs.end();
   LOG_INFO("NVS: ext_dac_vref loaded = %.3f V", storedVref);
   // ExternalDAC will be initialized by mosfet_controller.begin() → hal::init();

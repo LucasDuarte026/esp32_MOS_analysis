@@ -47,7 +47,7 @@ enum SweepMode {
 // ----------------------------------------------------------------------------
 struct SweepConfig {
     float vgs_start;            ///< Gate sweep start voltage (V)
-    float vgs_end;              ///< Gate sweep end voltage (V), up to 5.0 V
+    float vgs_end;              ///< Gate sweep end voltage (V), up to 5.12 V
     float vgs_step;             ///< Gate voltage increment per step (V)
     float vds_start;            ///< Drain sweep start voltage (V)
     float vds_end;              ///< Drain sweep end voltage (V)
@@ -58,7 +58,7 @@ struct SweepConfig {
     uint8_t  adc_gain_vsh = 255;  ///< 255=AUTO per channel (A0/A3); else fixed PGA for shunt reads
     uint8_t  adc_gain_vd  = 0;  ///< ADS1115 PGA gain for VD (A1): Usually 0 for ±6.144V
     uint8_t  adc_gain_vg  = 0;  ///< ADS1115 PGA gain for VG (A2): Usually 0 for ±6.144V
-    float    ext_dac_vref = 5.0f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.
+    float    ext_dac_vref = 5.12f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
     SweepMode sweep_mode = SWEEP_VGS; ///< Which axis drives the inner loop

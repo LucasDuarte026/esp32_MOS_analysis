@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(cfg => {
             const el = document.getElementById('ext-dac-vref');
             if (el && cfg.ext_dac_vref != null) {
-                el.value = parseFloat(cfg.ext_dac_vref).toFixed(1);
+                el.value = parseFloat(cfg.ext_dac_vref).toFixed(3);
             }
         })
         .catch(() => { }); // Silently ignore if offline or first boot
@@ -133,9 +133,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // MCP4725 supply voltage validation
         const extDacVrefEl = document.getElementById('ext-dac-vref');
-        const extDacVref = extDacVrefEl ? parseFloat(extDacVrefEl.value) : 5.0;
+        const extDacVref = extDacVrefEl ? parseFloat(extDacVrefEl.value) : 5.12;
         if (isNaN(extDacVref) || extDacVref < 4.0 || extDacVref > 5.5) {
-            errorMsg += `- Tensão MCP4725 fora da faixa (${extDacVref.toFixed(1)}V). Use entre 4.0V e 5.5V\n`;
+            errorMsg += `- Tensão MCP4725 fora da faixa (${extDacVref.toFixed(3)}V). Use entre 4.0V e 5.5V\n`;
         }
 
         // Automatically swap start/end if inverted
@@ -368,7 +368,7 @@ document.getElementById('btn-clear-logs')?.addEventListener('click', () => {
 document.getElementById('btn-reset-fields')?.addEventListener('click', () => {
     // VDS fields
     document.getElementById('vds-start').value = '0';
-    document.getElementById('vds-end').value = '5.0';
+    document.getElementById('vds-end').value = '5.12';
     document.getElementById('vds-step').value = '0.05';
 
     // VGS fields

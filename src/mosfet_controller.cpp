@@ -94,7 +94,7 @@ bool MOSFETController::startMeasurementAsync(const SweepConfig& config)
         return false;
     }
     
-    if (config.vgs_start < 0 || config.vgs_end > 5.0 || config.vds_end > 5.0) {
+    if (config.vgs_start < 0 || config.vgs_end > 5.12 || config.vds_end > 5.12) {
         LOG_ERROR("Invalid Voltage range");
         if (mutex_) xSemaphoreGive(mutex_);
         return false;
@@ -585,6 +585,40 @@ void MOSFETController::performSweep()
         config_.oversampling, 
         config_.settling_ms,
         config_.adc_gain_vsh);
+
+    // ── [TEST: ZERO-CURRENT BASELINE GND CORRECTION] ───────────────────────
+    // PURPOSE: With MOSFET off (VGS=0, VDS=0), no current flows through the
+    //          shunt. Any non-zero reading on A0 is a systematic offset caused
+    //          by GND bounce / IR drop on the ground bus. We capture this and
+    //          subtract it from every subsequent A0 reading.
+    //
+    // ROLLBACK: Set ENABLE_BASELINE_GND_CORRECTION to false below.
+    //           This restores original behaviour without any other changes.
+    // ────────────────────────────────────────────────────────────────────────
+    constexpr bool ENABLE_BASELINE_GND_CORRECTION = false; // [TEST FLAG] DISABLED: Test proved offset=0V at zero current. Problem is dynamic IR drop (I×R_trace).
+    float baseline_vsh_a0 = 0.f;
+
+    if (ENABLE_BASELINE_GND_CORRECTION) {
+        // Ensure MOSFET is completely off: VGS=0, VDS=0
+        hal::setVGS(0.0f);
+        hal::setVDS(0.0f);
+        vTaskDelay(pdMS_TO_TICKS(50)); // settle
+
+        // Read A0 with auto-gain (shunt voltage with zero current = pure GND offset)
+        hal::ShuntSample bl = hal::measureShuntSample(255, false);
+        baseline_vsh_a0 = bl.vsh_a0;
+
+        LOG_INFO("[BASELINE-TEST] Zero-current A0 offset = %.6f V (%.3f mA equiv @ R=%.1f)",
+                 baseline_vsh_a0, (baseline_vsh_a0 / config_.rshunt) * 1000.0f, config_.rshunt);
+
+        // Write baseline to CSV header
+        len = snprintf(lineBuf, sizeof(lineBuf),
+                       "# [GND_BASELINE] vsh_a0_offset=%.6f V (subtracted from all A0 readings)\n",
+                       baseline_vsh_a0);
+        currentFile_.write((uint8_t*)lineBuf, len);
+        currentFile_.flush();
+    }
+    // ── [END TEST BLOCK] ───────────────────────────────────────────────────
     
     int rowCount = 0;
     int lastLoggedPercent = -1;
@@ -640,6 +674,15 @@ void MOSFETController::performSweep()
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
                 hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh, config_.use_vsh_precise);
+                // ── [TEST: Apply baseline correction to A0 reading] ────────
+                if (ENABLE_BASELINE_GND_CORRECTION && baseline_vsh_a0 > 0.f) {
+                    sh.vsh_a0 = (sh.vsh_a0 > baseline_vsh_a0) ? (sh.vsh_a0 - baseline_vsh_a0) : 0.f;
+                    // If vsh_for_ids came from A0 path, re-apply
+                    if (sh.raw_a3 >= hal::VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+                        sh.vsh_for_ids = sh.vsh_a0;
+                    }
+                }
+                // ── [END TEST BLOCK] ───────────────────────────────────────
                 float vsh_for_ids = sh.vsh_for_ids;
                 float vds_true  = vd_actual - vsh_for_ids;
                 float vgs_true  = vg_actual - vsh_for_ids;
@@ -745,6 +788,15 @@ void MOSFETController::performSweep()
                 float vd_actual = hal::readVD_Actual(config_.adc_gain_vd);
                 float vg_actual = hal::readVG_Actual(config_.adc_gain_vg);
                 hal::ShuntSample sh = hal::measureShuntSample(config_.adc_gain_vsh, config_.use_vsh_precise);
+                // ── [TEST: Apply baseline correction to A0 reading] ────────
+                if (ENABLE_BASELINE_GND_CORRECTION && baseline_vsh_a0 > 0.f) {
+                    sh.vsh_a0 = (sh.vsh_a0 > baseline_vsh_a0) ? (sh.vsh_a0 - baseline_vsh_a0) : 0.f;
+                    // If vsh_for_ids came from A0 path, re-apply
+                    if (sh.raw_a3 >= hal::VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+                        sh.vsh_for_ids = sh.vsh_a0;
+                    }
+                }
+                // ── [END TEST BLOCK] ───────────────────────────────────────
                 float vsh_for_ids = sh.vsh_for_ids;
 
                 float vds_true_val = vd_actual - vsh_for_ids;

@@ -190,7 +190,7 @@ function validateVoltageLimit(inputElement) {
     const value = parseFloat(inputElement.value);
     if (value > currentVDD) {
         alert(`⚠️ Atenção: A tensão máxima é limitada pela alimentação VDD (${currentVDD}V${usbConnected ? ' via USB' : ''})`);
-        inputElement.value = currentVDD.toFixed(1);
+        inputElement.value = currentVDD.toFixed(3);
     }
 }
 

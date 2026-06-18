@@ -85,7 +85,8 @@ public:
     /** Read voltage from the default/primary channel (oversampled). */
     virtual float    readVoltage() = 0;
     
-    /** Read voltage from a specific channel (oversampled). */
+    /** Read voltage from a specific channel (oversampled). 
+     *  @return Physical pin voltage in Volts (not converted shunt-equivalent). */
     virtual float    readVoltage(uint8_t channel, uint8_t gainOverride = 255) = 0;
     
     /** Read voltage (fast 1-3 samples max, no heavy filtering). */
@@ -136,8 +137,8 @@ struct HalConfig {
     float dac_vref       = 3.3f; // ESP32 Internal DAC Ref
     float adc_vref       = 3.3f; // ESP32 Internal ADC Ref
     float ext_dac_vref   = 5.12f; // MCP4725 VDD Ref
-    float max_vds        = 5.0f;  // Capped at 5.0V even if supply is higher
-    float max_vgs        = 5.0f;  // Capped at 5.0V even if supply is higher
+    float max_vds        = 5.12f; // Updated to match 5.12V hardware reference
+    float max_vgs        = 5.12f; // Updated to match 5.12V hardware reference
 };
 
 // ============================================================================
@@ -159,15 +160,15 @@ constexpr uint8_t  ADC_SHUNT_AMP_CH    = 3;  // A3: Amplified shunt (via LM358)
 
 // ── LM358 Amplified Shunt Parameters (A3: vsh_precise = f(raw_a3_volts)) ──
 // The LM358 amplifies the shunt voltage before the ADS1115 A3 input.
-// Measured Calibration (2026-04-12, 992R test): Gain = 31.434663, Offset = -9.88 mV
-// Note: 992R result used instead of 1R to avoid ground-drift errors at high currents.
-constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.434663f;
+// Measured Calibration (2026-04-12, 985R precision test): Gain = 31.521084, Offset = -47.12 mV
+// Note: 985R result used for near-perfect R2 (0.999999) and low corent immunity to ground shift.
+constexpr float    SHUNT_AMP_GAIN_INV  = 1.0f / 31.521084f;
 
 /**
  * DC offset (V) subtracted from the RAW A3 voltage BEFORE dividing by gain.
  * This represents the LM358 output offset (input offset * gain).
  */
-constexpr float    SHUNT_AMP_A3_OFFSET_V = -0.009884f;
+constexpr float    SHUNT_AMP_A3_OFFSET_V = -0.047120f;
 
 /** If A3 ADC voltage (before ÷ gain) is >= this, use A0 direct shunt for Ids
  *  (LM358 saturates at ~3.77 V; we switch at 3.70 V for safety margin). */
@@ -206,7 +207,7 @@ constexpr uint16_t ADC_MAX_VALUE       = 4095;
 constexpr float    ADC_VREF            = 3.3f;
 constexpr uint16_t ADC_DEFAULT_SAMPLES = 64;
 
-// External DAC (MCP4725 — 12-bit, 0–5.0 V typical)
+// External DAC (MCP4725 — 12-bit, 0–5.12 V typical)
 constexpr uint8_t  EXT_DAC_VGS_ADDR  = 0x60;  // ADDR pin → GND
 constexpr uint8_t  EXT_DAC_VDS_ADDR  = 0x61;  // ADDR pin → VCC
 constexpr uint8_t  EXT_DAC_BITS      = 12;
@@ -301,7 +302,7 @@ private:
 // write is deterministic and does not benefit from averaging.
 class ExternalDAC : public IVoltageSource {
 public:
-    explicit ExternalDAC(uint8_t i2cAddr, float maxVoltage = 5.0f);
+    explicit ExternalDAC(uint8_t i2cAddr, float maxVoltage = 5.12f);
     ~ExternalDAC() override = default;
 
     void    setVoltage(float voltage) override;

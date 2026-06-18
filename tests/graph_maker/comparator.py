@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/home/luska/Documents/projects/esp32_mosfet_analysis/tests/graph_maker/venv/bin/python3
+
 """
 MOSFET Curve Comparator 
 -----------------------
@@ -161,8 +162,85 @@ def _find_col(columns, candidates):
         if cand.lower() in lower:
             return lower[cand.lower()]
     return None
-
-
+    
+def extract_mosfet_parameters(filepath: str, df_sub: pd.DataFrame, x_col: str, y_col: str):
+    vt_str, ss_str, maxgm_str = "-", "-", "-"
+    if df_sub is None or df_sub.empty or not filepath:
+        return vt_str, ss_str, maxgm_str
+        
+    try:
+        # Try to find ESP32 footer for pre-calculated values
+        with open(filepath, "r", encoding="utf-8-sig", errors="ignore") as fh:
+            lines = fh.readlines()
+            for line in reversed(lines[-20:]):
+                if line.startswith("#") and "Vt_Gm=" in line:
+                    import re
+                    m_vt = re.search(r"Vt_Gm=([\d\.]+)", line)
+                    m_ss = re.search(r"SS=([\d\.]+)", line)
+                    m_gm = re.search(r"MaxGm=([\d\.eE\+\-]+)", line)
+                    if m_vt: vt_str = f"{float(m_vt.group(1)):.3f}"
+                    if m_ss: ss_str = f"{float(m_ss.group(1)):.2f}"
+                    if m_gm: maxgm_str = f"{float(m_gm.group(1)):.2e}"
+                    return vt_str, ss_str, maxgm_str
+    except Exception:
+        pass
+        
+    # Calculate dynamically for Reference/SMU
+    try:
+        if 'gm' in df_sub.columns:
+            maxgm_str = f"{df_sub['gm'].max():.2e}"
+            
+        if 'Vt' in df_sub.columns and x_col in df_sub.columns:
+            max_vt_idx = df_sub['Vt'].idxmax()
+            vt_str = f"{df_sub.loc[max_vt_idx, x_col]:.3f}"
+            
+        if y_col in df_sub.columns and x_col in df_sub.columns:
+            y_abs = df_sub[y_col].abs().values
+            xs = df_sub[x_col].values
+            
+            # Find subthreshold region (strictly increasing, between 1e-8 and 1e-4 A)
+            valid_mask = (y_abs >= 1e-8) & (y_abs <= 1e-4)
+            valid_idx = np.where(valid_mask)[0]
+            
+            if len(valid_idx) > 5:
+                best_slope = 0.0
+                best_r2 = -1.0
+                n = len(valid_idx)
+                win_size = min(15, max(5, n // 2))
+                
+                xs_valid = xs[valid_idx]
+                log_ys = np.log10(y_abs[valid_idx])
+                
+                for w in range(5, win_size + 1):
+                    for i in range(n - w + 1):
+                        x_w = xs_valid[i:i+w]
+                        y_w = log_ys[i:i+w]
+                        
+                        # ensure x_w is strictly increasing
+                        if not np.all(np.diff(x_w) > 0):
+                            continue
+                            
+                        slope, intercept = np.polyfit(x_w, y_w, 1)
+                        if slope <= 0:
+                            continue
+                            
+                        y_pred = slope * x_w + intercept
+                        ss_tot = np.sum((y_w - np.mean(y_w))**2)
+                        ss_res = np.sum((y_w - y_pred)**2)
+                        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                        
+                        if r2 > best_r2:
+                            best_r2 = r2
+                            best_slope = slope
+                            
+                if best_slope > 0 and best_r2 > 0.90:
+                    ss_mv_dec = (1.0 / best_slope) * 1000.0
+                    ss_str = f"{ss_mv_dec:.2f}"
+    except Exception as e:
+        print(f"[Params] Error: {e}")
+        
+    return vt_str, ss_str, maxgm_str
+    
 # ---------------------------------------------------------------------------
 #  Main window
 # ---------------------------------------------------------------------------
@@ -179,6 +257,13 @@ class CurveComparator(QMainWindow):
         self.pairs = []
         self.current_pair_idx = -1
         self._is_updating_ui = False
+        
+        # Font settings
+        self.font_sizes = {
+            "title": 12,
+            "axes": 10,
+            "legend": 9
+        }
 
         self._build_ui()
         self._sync_state_to_ui()
@@ -243,6 +328,18 @@ class CurveComparator(QMainWindow):
         
         global_lay.addRow("Título do Gráfico:", self.plot_title_le)
         global_lay.addRow("Posição da Legenda:", self.leg_pos_cb)
+        
+        # Font Controls
+        font_grp = QGroupBox("Tamanho das Fontes")
+        font_lay = QVBoxLayout()
+        
+        font_lay.addLayout(self._make_font_row("Título", "title"))
+        font_lay.addLayout(self._make_font_row("Eixos", "axes"))
+        font_lay.addLayout(self._make_font_row("Legenda", "legend"))
+        
+        font_grp.setLayout(font_lay)
+        global_lay.addRow(font_grp)
+        
         global_grp.setLayout(global_lay)
         ctrl_lay.addWidget(global_grp)
 
@@ -297,10 +394,11 @@ class CurveComparator(QMainWindow):
         
         # table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(
-            ["Par de Curvas", "Legenda Curva 1", "Legenda Curva 2", "RMSE", "NRMSE"]
-        )
+        self.table.setColumnCount(11)
+        self.table.setHorizontalHeaderLabels([
+            "Par", "L1", "L2", "RMSE", "NRMSE", 
+            "Vt1 (V)", "Vt2 (V)", "SS1 (mV/dec)", "SS2 (mV/dec)", "MaxGm1 (S)", "MaxGm2 (S)"
+        ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         right_splitter.addWidget(self.table)
         
@@ -392,6 +490,39 @@ class CurveComparator(QMainWindow):
             "grp": grp_cb, "val": val_cb, "offset": offset_val,
             "legend": legend_le, "color": color_cb, "line": line_cb, "marker": marker_cb, "alpha": alpha_cb
         }
+
+    def _make_font_row(self, label_text, key):
+        row = QHBoxLayout()
+        lbl = QLabel(label_text)
+        lbl.setMinimumWidth(60)
+        
+        btn_minus = QPushButton("-")
+        btn_minus.setFixedSize(25, 25)
+        btn_minus.clicked.connect(lambda: self._change_font_size(key, -1))
+        
+        self.font_labels = getattr(self, "font_labels", {})
+        size_lbl = QLabel(str(self.font_sizes[key]))
+        size_lbl.setMinimumWidth(20)
+        size_lbl.setAlignment(Qt.AlignCenter)
+        self.font_labels[key] = size_lbl
+        
+        btn_plus = QPushButton("+")
+        btn_plus.setFixedSize(25, 25)
+        btn_plus.clicked.connect(lambda: self._change_font_size(key, 1))
+        
+        row.addWidget(lbl)
+        row.addStretch()
+        row.addWidget(btn_minus)
+        row.addWidget(size_lbl)
+        row.addWidget(btn_plus)
+        return row
+
+    def _change_font_size(self, key, delta):
+        new_size = max(4, min(40, self.font_sizes[key] + delta))
+        self.font_sizes[key] = new_size
+        if hasattr(self, "font_labels") and key in self.font_labels:
+            self.font_labels[key].setText(str(new_size))
+        self._update_plot()
 
     # ---- Logic ------------------------------------------------------------
 
@@ -667,17 +798,20 @@ class CurveComparator(QMainWindow):
         
         for r_idx, pair in enumerate(self.pairs):
             states = [pair.c1, pair.c2]
-            curve_data = [] 
+            curve_data = []
+            param_res = []
             
             for i in range(2):
                 s = states[i]
                 df = s.df
                 if df is None or not s.show:
                     curve_data.append(None)
+                    param_res.append(("-", "-", "-"))
                     continue
                     
                 if not (s.x_col and s.y_col and s.grp_col and s.val_str):
                     curve_data.append(None)
+                    param_res.append(("-", "-", "-"))
                     continue
                     
                 try:
@@ -686,7 +820,11 @@ class CurveComparator(QMainWindow):
                     sub = df.loc[mask].sort_values(s.x_col)
                     if sub.empty:
                         curve_data.append(None)
+                        param_res.append(("-", "-", "-"))
                         continue
+                        
+                    vt, ss, mgm = extract_mosfet_parameters(s.filepath, sub, s.x_col, s.y_col)
+                    param_res.append((vt, ss, mgm))
                         
                     xs = sub[s.x_col].values + s.offset
                     ys = sub[s.y_col].values
@@ -726,6 +864,7 @@ class CurveComparator(QMainWindow):
                 except Exception as exc:
                     print(f"[plot] Pair '{pair.name}' curve {i+1}: {exc}")
                     curve_data.append(None)
+                    if len(param_res) <= i: param_res.append(("-", "-", "-"))
             
             # --- Metrics for Table ---
             rmse_str, nrmse_str = "-", "-"
@@ -762,11 +901,23 @@ class CurveComparator(QMainWindow):
             self.table.setItem(r_idx, 2, QTableWidgetItem(l2))
             self.table.setItem(r_idx, 3, QTableWidgetItem(rmse_str))
             self.table.setItem(r_idx, 4, QTableWidgetItem(nrmse_str))
+            
+            # Additional Parms
+            p1 = param_res[0] if len(param_res) > 0 else ("-", "-", "-")
+            p2 = param_res[1] if len(param_res) > 1 else ("-", "-", "-")
+            
+            self.table.setItem(r_idx, 5, QTableWidgetItem(p1[0])) # Vt 1
+            self.table.setItem(r_idx, 6, QTableWidgetItem(p2[0])) # Vt 2
+            self.table.setItem(r_idx, 7, QTableWidgetItem(p1[1])) # SS 1
+            self.table.setItem(r_idx, 8, QTableWidgetItem(p2[1])) # SS 2
+            self.table.setItem(r_idx, 9, QTableWidgetItem(p1[2])) # Gm 1
+            self.table.setItem(r_idx, 10, QTableWidgetItem(p2[2])) # Gm 2
 
         if plotted:
             title_text = self._safe_math(self.plot_title_le.text(), "Título")
-            self.ax.set_title(title_text, fontsize=11)
-            self.ax.set_xlabel(r"$V_{GS}$ (V)")
+            self.ax.set_title(title_text, fontsize=self.font_sizes["title"])
+            self.ax.set_xlabel(r"$V_{GS}$ (V)", fontsize=self.font_sizes["axes"])
+            self.ax.tick_params(axis='both', which='major', labelsize=self.font_sizes["axes"])
             
             # Map choice to matplotlib 'loc'
             leg_map = {
@@ -782,24 +933,25 @@ class CurveComparator(QMainWindow):
             leg_loc = leg_map.get(self.leg_pos_cb.currentText(), "best")
             
             if show_lin:
-                self.ax.set_ylabel(r"$I_{DS}$ (A) [Linear]")
+                self.ax.set_ylabel(r"$I_{DS}$ (A) [Linear]", fontsize=self.font_sizes["axes"])
                 self.ax.set_yscale("linear")
                 self.ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
                 self.ax.grid(True, ls="--", alpha=0.6, which="both")
-                self.ax.legend(loc=leg_loc, fontsize=8)
+                self.ax.legend(loc=leg_loc, fontsize=self.font_sizes["legend"])
             else:
                 self.ax.set_yticks([])
                 
             if show_log and self.ax2 is not None:
-                self.ax2.set_ylabel(r"$I_{DS}$ (A) [Log]")
+                self.ax2.set_ylabel(r"$I_{DS}$ (A) [Log]", fontsize=self.font_sizes["axes"])
                 self.ax2.set_yscale("log")
+                self.ax2.tick_params(axis='y', which='both', labelsize=self.font_sizes["axes"])
                 if not show_lin:
                     self.ax2.grid(True, ls="--", alpha=0.6, which="both")
-                    self.ax2.legend(loc=leg_loc, fontsize=8)
+                    self.ax2.legend(loc=leg_loc, fontsize=self.font_sizes["legend"])
                 else:
                     # If both are active, and same loc is chosen, they might overlap. 
                     # 'best' usually handles this but separate axes legends are tricky.
-                    self.ax2.legend(loc=leg_loc, fontsize=8)
+                    self.ax2.legend(loc=leg_loc, fontsize=self.font_sizes["legend"])
 
             try:
                 self.figure.tight_layout()

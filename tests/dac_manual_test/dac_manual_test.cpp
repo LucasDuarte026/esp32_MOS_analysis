@@ -9,7 +9,7 @@
 #define ADS1115_ADDR    0x48
 
 // Referências de Tensão
-#define VREF_EXTERNAL 5.0 // Voltagem de alimentação dos MCP4725 (VDD)
+#define VREF_EXTERNAL 5.12 // Voltagem de alimentação dos MCP4725 (VDD)
 
 Adafruit_MCP4725 mcpVG; // Gate
 Adafruit_MCP4725 mcpVD; // Drain

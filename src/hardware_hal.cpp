@@ -318,9 +318,11 @@ float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
     const float avgRaw = static_cast<float>(sum) / count;
     float voltage = avgRaw * (fsr_ / static_cast<float>(EXT_ADC_MAX_RAW));
     
-    if (channel == ADC_SHUNT_AMP_CH) {
-        return shuntAmplifiedAdcToVoltage(voltage);
+    if (channel == ADC_SHUNT_NOM_CH && initialized_) {
+        LOG_DEBUG("[ADC_DIAG] Ch%d: raw=%.1f, fsr=%.3fV, gCode=%d, V=%.6f", 
+                  channel, avgRaw, fsr_, currentGainCode_, voltage);
     }
+    
     return voltage;
 }
 
@@ -671,11 +673,49 @@ ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode, bool usePrecise) {
         s.vsh_for_ids = s.vsh_a0;
         return s;
     }
+
+    // ── [TEST: GND-BOUNCE CORRECTION via A3 as GND reference] ──────────────
+    // PURPOSE: A3 is normally used as the amplified shunt channel (vsh_precise).
+    //          In this test, we ALSO read A3 with auto-gain BEFORE amplification
+    //          context, treating its raw voltage as the GND potential at the
+    //          shunt node. This offset is subtracted from vsh_a0 (the A0 reading)
+    //          to cancel the IR drop along the GND bus.
+    //
+    // ROLLBACK: Set ENABLE_GND_BOUNCE_CORRECTION_TEST to false (line below).
+    //           This restores the original behaviour without any other changes.
+    //
+    // NOTE: A3 role for vsh_precise is UNCHANGED — it still runs auto-gain
+    //       through readVoltageFast(ADC_SHUNT_AMP_CH, 255) below, which uses
+    //       the ADS1115 PGA auto-range for that channel.
+    // ────────────────────────────────────────────────────────────────────────
+    constexpr bool ENABLE_GND_BOUNCE_CORRECTION_TEST = false; // [TEST FLAG] DISABLED: A3 measures LM358 output, not GND potential. See baseline test in mosfet_controller.cpp instead.
+
+    float gnd_offset_V = 0.f;
+    if (ENABLE_GND_BOUNCE_CORRECTION_TEST) {
+        // Read A3 with auto-gain (255) as a raw GND reference voltage.
+        // The gain is tracked per-channel by lastAutoGain_, so it does not
+        // disturb the subsequent amplified read.
+        gnd_offset_V = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
+        LOG_INFO("[GND-TEST] A3 raw (GND offset)=%.4f V", gnd_offset_V); // [TEST LOG]
+    }
+    // ── [END TEST BLOCK] ───────────────────────────────────────────────────
+
     // A3 then A0: each read uses its own lastAutoGain_[ch] when gainCode == ADC_GAIN_AUTO
     // A3 ALWAYS uses auto-gain (255) for maximum precision
     s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
     s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
     s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+
+    // ── [TEST: Apply GND offset correction to vsh_a0] ──────────────────────
+    // TO ROLLBACK: Set ENABLE_GND_BOUNCE_CORRECTION_TEST = false above.
+    if (ENABLE_GND_BOUNCE_CORRECTION_TEST && gnd_offset_V > 0.f) {
+        float corrected_vsh_a0 = s.vsh_a0 - gnd_offset_V;
+        LOG_INFO("[GND-TEST] vsh_a0 raw=%.4f V | gnd_offset=%.4f V | corrected=%.4f V",
+                  s.vsh_a0, gnd_offset_V, corrected_vsh_a0); // [TEST LOG]
+        s.vsh_a0 = (corrected_vsh_a0 > 0.f) ? corrected_vsh_a0 : 0.f;
+    }
+    // ── [END TEST BLOCK] ───────────────────────────────────────────────────
+
     if (usePrecise) {
         // High-end: If LM358 is saturated, use Direct A0
         if (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
