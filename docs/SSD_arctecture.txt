@@ -1,0 +1,48 @@
+Analise a estrutura completa do sistema, seus módulos, arquivos, dependências e padrões de implementação para gerar documentação técnica padronizada e atualizada automaticamente.
+
+Durante a análise, você deve produzir os seguintes artefatos:
+
+1. Um documento geral chamado Arquitetura do Sistema, contendo:
+
+* visão arquitetural do projeto;
+* padrões utilizados;
+* regras arquiteturais;
+* convenções técnicas;
+* separação de responsabilidades;
+* fluxo de comunicação entre módulos;
+* dependências críticas;
+* riscos técnicos e acoplamentos importantes;
+* diretrizes para futuras implementações.
+
+2. Um documento chamado Objetivo do Sistema, contendo:
+
+* propósito principal do sistema;
+* problemas que ele resolve;
+* principais fluxos de negócio;
+* atores envolvidos;
+* funcionalidades centrais;
+* visão de produto;
+* contexto operacional do sistema.
+
+3. Um documento README.md dentro de cada módulo/pasta relevante do projeto contendo:
+
+* objetivo do módulo;
+* responsabilidade principal;
+* funcionalidades existentes;
+* dependências internas e externas;
+* módulos relacionados;
+* pontos de entrada;
+* fluxos importantes;
+* arquivos críticos;
+* observações técnicas e débitos identificados.
+
+Regras Importantes:
+
+* Nunca invente comportamento que não exista no código.
+* Inferências devem ser marcadas explicitamente como Hipótese.
+* Priorize análise baseada em código real, estrutura de pastas, imports, chamadas e configurações.
+* Identifique módulos órfãos, acoplamentos excessivos e violações arquiteturais.
+* Sempre explique dependências entre módulos.
+* Gere documentação clara, objetiva e orientada para manutenção futura.
+* Considere que a documentação será utilizada como base oficial de desenvolvimento futuro no modelo Spec Driven Development.
+* Sempre mantenha consistência entre os documentos globais e os documentos locais dos módulos.

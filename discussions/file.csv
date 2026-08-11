@@ -1,0 +1,11 @@
+Posição,Componente,Faixa de Operação (V),Rail Down (Típico aprox. ao GND),Rail Up (Típico para VDD = 12V),Destaque Principal
+1,OPA2237UA,2.7V a 36V,~ 0.01V (10 mV),~ 11.25V (VDD - 0.75V),Melhor substituto de precisão (LT1013).
+2,OPA2244UA,2.2V a 36V,~ 0.01V (10 mV),~ 11.20V (VDD - 0.80V),Versão MicroPower (consumo de 50 µA).
+3,MC33201DR2G,1.8V a 12V*,~ 0.05V (50 mV),~ 11.95V (VDD - 0.05V),RRIO autêntico. (Atenção: 12V é o limite máximo).
+4,TLV2242IDR,2.7V a 12V*,~ 0.01V (10 mV),~ 11.99V (VDD - 0.01V),RIO otimizado para baixa potência.
+5,LM358DR (Orig.),3.0V a 32V,~ 0.02V (20 mV),~ 10.50V (VDD - 1.50V),"O clássico ""Single Supply"". Custo-benefício."
+6,LM358DR (TI),3.0V a 32V,~ 0.02V (20 mV),~ 10.50V (VDD - 1.50V),Equivalente padrão de mercado ao original.
+7,LM2904DT,3.0V a 26V,~ 0.02V (20 mV),~ 10.50V (VDD - 1.50V),Versão de robustez industrial (térmica).
+8,TSM103WAIDT,2.5V a 36V,~ 0.02V (20 mV),~ 10.50V (VDD - 1.50V),Solução integrada com referência de tensão.
+9,OP282GSZ,9.0V a 36V,~ 0.10V (100 mV),~ 11.90V (VDD - 0.10V),"Arquitetura JFET, tolera altas tensões com folga."
+10,OPA4277UA,4.0V a 36V,~ 0.50V (500 mV),~ 11.50V (VDD - 0.50V),Quad-amp de altíssima precisão e baixo offset.
