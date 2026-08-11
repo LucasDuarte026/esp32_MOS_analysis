@@ -28,8 +28,8 @@ Garantir o processamento concorrente seguro de requisições web, a execução r
 
 ## 4. Dependências Internas e Externas
 * **Dependências Internas**:
-  * [include/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/) (arquivos de cabeçalho de definição de constantes e tipos).
-  * [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) (código fonte frontend que é compilado e embarcado).
+  * [include/](/home/luska/Documents/projects/esp32_mosfet_analysis/include/) (arquivos de cabeçalho de definição de constantes e tipos).
+  * [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) (código fonte frontend que é compilado e embarcado).
 * **Dependências Externas**:
   * **Framework Arduino para ESP32** (sobre o ESP-IDF).
   * **Adafruit ADS1X15 Library**: Driver para comunicação com o ADC ADS1115.
@@ -40,9 +40,9 @@ Garantir o processamento concorrente seguro de requisições web, a execução r
 ---
 
 ## 5. Módulos Relacionados
-* [include/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/): Mapeia as assinaturas das classes e configurações estáticas do firmware.
-* [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/): Fornece a interface visual que se comunica via HTTP com a API REST implementada neste módulo.
-* [scripts/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): Contém o minificador e empacotador de frontend que injeta o arquivo `web_dashboard.h` neste módulo durante o pré-build.
+* [include/](/home/luska/Documents/projects/esp32_mosfet_analysis/include/): Mapeia as assinaturas das classes e configurações estáticas do firmware.
+* [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/): Fornece a interface visual que se comunica via HTTP com a API REST implementada neste módulo.
+* [scripts/](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): Contém o minificador e empacotador de frontend que injeta o arquivo `web_dashboard.h` neste módulo durante o pré-build.
 
 ---
 
@@ -53,10 +53,10 @@ Garantir o processamento concorrente seguro de requisições web, a execução r
 * **`loop()` (em `main.cpp`)**: Apenas monitora o watchdog básico do sistema, pois a execução ocorre através de tarefas agendadas em multithread pelo FreeRTOS.
 
 ### 6.2 Arquivos Críticos
-1. **[main.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp)**: Inicialização global do microcontrolador e definição das rotas de API HTTP.
-2. **[mosfet_controller.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp)**: Core do caracterizador. Controla a máquina de estados, o algoritmo de varredura (sweeps) e a malha de controle PID simples.
-3. **[hardware_hal.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp)**: Abstração de hardware. Contém as leituras do barramento I2C, o algoritmo de *Oversampling & Trimmed Mean* e o chaveamento dinâmico de ganhos do ADS1115 (PGA).
-4. **[math_engine.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp)**: Motor matemático para Savitzky-Golay, transcondutância, extrapolação de $V_{th}$ e regressão linear de $SS$.
+1. **[main.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp)**: Inicialização global do microcontrolador e definição das rotas de API HTTP.
+2. **[mosfet_controller.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp)**: Core do caracterizador. Controla a máquina de estados, o algoritmo de varredura (sweeps) e a malha de controle PID simples.
+3. **[hardware_hal.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp)**: Abstração de hardware. Contém as leituras do barramento I2C, o algoritmo de *Oversampling & Trimmed Mean* e o chaveamento dinâmico de ganhos do ADS1115 (PGA).
+4. **[math_engine.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp)**: Motor matemático para Savitzky-Golay, transcondutância, extrapolação de $V_{th}$ e regressão linear de $SS$.
 
 ---
 

@@ -27,26 +27,26 @@ Prover uma experiência de uso de alta qualidade no navegador (Zero-Instalação
 
 ## 4. Dependências Internas e Externas
 * **Dependências Internas**:
-  * [src/web_ui.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp) (endpoint C++ que serve este frontend compactado em PROGMEM).
-  * [scripts/embed_web.py](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py) (script que minifica os arquivos desta pasta para embarque).
+  * [src/web_ui.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp) (endpoint C++ que serve este frontend compactado em PROGMEM).
+  * [scripts/embed_web.py](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py) (script que minifica os arquivos desta pasta para embarque).
 * **Dependências Externas (CDNs)**:
   * **Plotly.js (v2.24.1)**: Biblioteca de plotagem científica interativa (carregada via CDN no browser).
 
 ---
 
 ## 5. Módulos Relacionados
-* [src/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/): Módulo backend que expõe os endpoints REST HTTP consumidos pelas rotinas JavaScript deste módulo.
-* [scripts/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): Contém ferramentas de compilação dos recursos e o servidor local de testes Python.
+* [src/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/): Módulo backend que expõe os endpoints REST HTTP consumidos pelas rotinas JavaScript deste módulo.
+* [scripts/](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): Contém ferramentas de compilação dos recursos e o servidor local de testes Python.
 
 ---
 
 ## 6. Arquivos Críticos e Organização de Código
 
-1. **[index.html](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/index.html)**: Ponto de entrada HTML. Contém os containers do dashboard e o formulário de parâmetros.
-2. **[core.js](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/core.js)**: Utilitários globais. Implementa Toasts (`showToast()`), logs categorizados (`dbg()`) e constantes de limite.
-3. **[collection.js](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/collection.js)**: Lógica de controle e polling. Gerencia o início/cancelamento do sweep e o pooling contínuo em `/api/progress`.
-4. **[visualization.js](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/visualization.js)**: Core matemático do frontend. Faz o parse do CSV de FFat, plota os gráficos do Plotly e renderiza o cálculo de $V_{th}$, $G_m$ e $SS$.
-5. **[dashboard.css](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/dashboard.css)**: Estilos da interface, incluindo responsividade para telas de dispositivos móveis.
+1. **[index.html](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/index.html)**: Ponto de entrada HTML. Contém os containers do dashboard e o formulário de parâmetros.
+2. **[core.js](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/core.js)**: Utilitários globais. Implementa Toasts (`showToast()`), logs categorizados (`dbg()`) e constantes de limite.
+3. **[collection.js](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/collection.js)**: Lógica de controle e polling. Gerencia o início/cancelamento do sweep e o pooling contínuo em `/api/progress`.
+4. **[visualization.js](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/visualization.js)**: Core matemático do frontend. Faz o parse do CSV de FFat, plota os gráficos do Plotly e renderiza o cálculo de $V_{th}$, $G_m$ e $SS$.
+5. **[dashboard.css](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/dashboard.css)**: Estilos da interface, incluindo responsividade para telas de dispositivos móveis.
 
 ---
 

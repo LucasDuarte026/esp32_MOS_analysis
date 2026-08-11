@@ -30,8 +30,8 @@ O módulo é dividido em subpastas de ensaios específicos:
 
 ## 4. Dependências Internas e Externas
 * **Dependências Internas**:
-  * [src/hardware_hal.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp) (utiliza as chamadas de baixo nível para controle dos pinos).
-  * [include/mosfet_controller.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/mosfet_controller.h) (consome os limites operacionais de sweep).
+  * [src/hardware_hal.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp) (utiliza as chamadas de baixo nível para controle dos pinos).
+  * [include/mosfet_controller.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/mosfet_controller.h) (consome os limites operacionais de sweep).
 * **Dependências Externas**:
   * **PlatformIO Native Test runner** (para testes standalone).
   * **Serial Monitor (115200 baud)**: Utilizado para interfaceamento e comandos manuais de teste.
@@ -39,8 +39,8 @@ O módulo é dividido em subpastas de ensaios específicos:
 ---
 
 ## 5. Módulos Relacionados
-* [src/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome os dados e códigos validados nesta pasta para incorporá-los de forma estável no firmware de produção.
-* [include/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/): Mapeia as configurações estáticas avaliadas por estes testes.
+* [src/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome os dados e códigos validados nesta pasta para incorporá-los de forma estável no firmware de produção.
+* [include/](/home/luska/Documents/projects/esp32_mosfet_analysis/include/): Mapeia as configurações estáticas avaliadas por estes testes.
 
 ---
 

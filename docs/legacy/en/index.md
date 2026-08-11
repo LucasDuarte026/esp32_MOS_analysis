@@ -66,7 +66,7 @@ The system operates in three distinct characterization modes, selectable via the
 
 To explore the details of this platform, navigate through the specialized documentation sections:
 
-* 🔌 **[Hardware Architecture](file:///home/luska/Documents/projects/esp32_mosfet_analysis/docs/hardware.md)**: Details the active topology, including the ESP32, dual MCP4725 DACs, ADS1115 ADC, LT1013 precision operational amplifier, and the active bleeder circuit.
-* 🧠 **[Firmware & Algorithms](file:///home/luska/Documents/projects/esp32_mosfet_analysis/docs/firmware.md)**: Explains the closed-loop control system, dual-core task sharing, I2C resource locking (mutex), oversampling + trimmed mean math, and the Savitzky-Golay filtering.
-* 🌐 **[Web Interface & API](file:///home/luska/Documents/projects/esp32_mosfet_analysis/docs/webui.md)**: Describes the design guidelines of the zero-dependency browser dashboard, Javascript modular structure, REST API specifications, and mDNS setup.
-* 🛠️ **[Calibration & Diagnostics](file:///home/luska/Documents/projects/esp32_mosfet_analysis/docs/calibration.md)**: Contains the 2-point calibration equations, ADC input protection leakage compensation, auto-zeroing routine, and troubleshooting logs for hardware crosstalk.
+* 🔌 **[Hardware Architecture](/home/luska/Documents/projects/esp32_mosfet_analysis/docs/hardware.md)**: Details the active topology, including the ESP32, dual MCP4725 DACs, ADS1115 ADC, LT1013 precision operational amplifier, and the active bleeder circuit.
+* 🧠 **[Firmware & Algorithms](/home/luska/Documents/projects/esp32_mosfet_analysis/docs/firmware.md)**: Explains the closed-loop control system, dual-core task sharing, I2C resource locking (mutex), oversampling + trimmed mean math, and the Savitzky-Golay filtering.
+* 🌐 **[Web Interface & API](/home/luska/Documents/projects/esp32_mosfet_analysis/docs/webui.md)**: Describes the design guidelines of the zero-dependency browser dashboard, Javascript modular structure, REST API specifications, and mDNS setup.
+* 🛠️ **[Calibration & Diagnostics](/home/luska/Documents/projects/esp32_mosfet_analysis/docs/calibration.md)**: Contains the 2-point calibration equations, ADC input protection leakage compensation, auto-zeroing routine, and troubleshooting logs for hardware crosstalk.

@@ -42,27 +42,27 @@ O projeto é estruturado em uma arquitetura hierárquica baseada no princípio d
 
 ### Camada 2: Abstração de Hardware (HAL)
 * **Responsabilidade**: Isolar o hardware físico do software lógico.
-* **Arquivos**: [hardware_hal.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/hardware_hal.h) e [hardware_hal.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp).
+* **Arquivos**: [hardware_hal.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/hardware_hal.h) e [hardware_hal.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp).
 * **Lógica**: Comunicação I2C, leitura do ADC com oversampling de 16x a 64x e ordenação por Insertion Sort (stack-only), controle dinâmico de ganho (PGA), aplicação do modelo de calibração linear da porta de dreno ($V_d$), auto-range dinâmico de shunt e interface abstrata de fallback para hardware interno.
 
 ### Camada 3: Controle e Matemática
 * **Responsabilidade**: Garantir estabilidade de polarização e calcular curvas analíticas.
-* **Arquivos**: [mosfet_controller.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp) e [math_engine.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp).
+* **Arquivos**: [mosfet_controller.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp) e [math_engine.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp).
 * **Lógica**: Algoritmo de malha fechada de duplo canal com tolerância de 2 mV e máximo de 10 iterações (compensação de degeneração de source). Processamento matemático de $G_m$ via derivadas suavizadas por Savitzky-Golay, cálculo de $V_{th}$ via extrapolação linear no ponto de $G_{m,max}$ e cálculo de $SS$ via regressão linear por janela deslizante no plano logarítmico.
 
 ### Camada 4: Orquestração e Sistema Operacional
 * **Responsabilidade**: Gerenciamento de tarefas concorrentes e gravação de arquivos de dados.
-* **Arquivos**: [main.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp), [wifi_manager.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/wifi_manager.cpp), [file_manager.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/file_manager.cpp), [log_buffer.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/log_buffer.cpp).
+* **Arquivos**: [main.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp), [wifi_manager.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/wifi_manager.cpp), [file_manager.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/file_manager.cpp), [log_buffer.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/log_buffer.cpp).
 * **Lógica**: Inicialização do ESP32, agendamento de tarefas do FreeRTOS (Core 0 para rede, Core 1 para varreduras), proteção do barramento I2C por mutex semafórico, buffer circular de logs gerenciado fisicamente por jumper no GPIO12, inicialização e gravação sequencial direta (sem alocação em heap) de CSVs na partição flash `FFat`.
 
 ### Camada 5: Transmissão e API
 * **Responsabilidade**: Exposição de endpoints HTTP e envio de relatórios.
-* **Arquivos**: [web_ui.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp) e [email_manager.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/email_manager.cpp).
+* **Arquivos**: [web_ui.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp) e [email_manager.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/email_manager.cpp).
 * **Lógica**: Roteamento do `ESPAsyncWebServer`, tratamento e serialização de requisições JSON da API REST, envio de arquivos CSV via SMTP de forma não-bloqueante utilizando conexões seguras.
 
 ### Camada 6: Apresentação (Cabeça)
 * **Responsabilidade**: Interface de interação direta com o operador.
-* **Arquivos**: Pasta [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/).
+* **Arquivos**: Pasta [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/).
 * **Lógica**: Interface gráfica no navegador, validação preliminar de inputs, polling de progresso de varredura, renderização gráfica das curvas utilizando Plotly.js e download ou disparo de exportação do CSV gerado.
 
 ---

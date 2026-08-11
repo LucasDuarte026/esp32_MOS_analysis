@@ -6,7 +6,7 @@
 >
 > [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 > 
-> 🌍 **English Documentation:** A complete version of the technical documentation is now available in English. Start reading at [docs/index.md](file:///home/luska/Documents/projects/esp32_mosfet_analysis/docs/index.md).
+> 🌍 **English Documentation:** A complete version of the technical documentation is now available in English. Start reading at [docs/index.md](/home/luska/Documents/projects/esp32_mosfet_analysis/docs/index.md).
 
 ---
 

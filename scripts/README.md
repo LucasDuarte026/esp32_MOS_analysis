@@ -25,8 +25,8 @@ Garantir a integridade física dos arquivos estáticos injetados na memória fla
 
 ## 4. Dependências Internas e Externas
 * **Dependências Internas**:
-  * [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) (insumo de arquivos para o minificador).
-  * [include/version.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h) (alvo de alteração de versão).
+  * [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) (insumo de arquivos para o minificador).
+  * [include/version.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h) (alvo de alteração de versão).
 * **Dependências Externas (Python Libraries)**:
   * **Pandas**: Manipulação de dados CSV para análises.
   * **Matplotlib / Seaborn**: Geração gráfica dos relatórios comparativos.
@@ -35,15 +35,15 @@ Garantir a integridade física dos arquivos estáticos injetados na memória fla
 ---
 
 ## 5. Módulos Relacionados
-* [src/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome o arquivo gerado `web_dashboard.h` para servir as páginas do dashboard web.
-* [include/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/): Hospeda o versionamento semântico atualizado.
+* [src/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome o arquivo gerado `web_dashboard.h` para servir as páginas do dashboard web.
+* [include/](/home/luska/Documents/projects/esp32_mosfet_analysis/include/): Hospeda o versionamento semântico atualizado.
 
 ---
 
 ## 6. Arquivos Críticos e Detalhamento Técnico
 
-1. **[embed_web.py](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py)**: Responsável por encapsular o frontend em flash (`PROGMEM`), gerando a constante `web_index_html_len` e correlatas.
-2. **[compare_iv.py](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/compare_iv.py)**: Script central de validação metrológica do artigo científico. Calcula as divergências de regressão entre a plataforma ESP32 e o Keysight B2902C.
+1. **[embed_web.py](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py)**: Responsável por encapsular o frontend em flash (`PROGMEM`), gerando a constante `web_index_html_len` e correlatas.
+2. **[compare_iv.py](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/compare_iv.py)**: Script central de validação metrológica do artigo científico. Calcula as divergências de regressão entre a plataforma ESP32 e o Keysight B2902C.
 
 ---
 

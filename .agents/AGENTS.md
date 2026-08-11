@@ -11,11 +11,11 @@
 ### 1.1 Modelo Spec-Driven Bottom-Up (Hierarquia de Dependência)
 Qualquer alteração em funcionalidade ou requisito deve propagar rigorosamente de baixo para cima:
 1. **Física/Hardware**: Limites físicos, shunts, pinagem e conexões analógicas.
-2. **Abstração (HAL)**: Leitura de barramento I2C, conversões analógicas, calibrações de sensores em [hardware_hal.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp).
-3. **Controle/Matemática**: Lógica do sweep e motores em [mosfet_controller.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp) e [math_engine.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp).
-4. **Sistema/Orquestração**: FreeRTOS, FFat, Wi-Fi e logs em [main.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp).
-5. **API REST / Serviços**: Endpoints HTTP em [web_ui.cpp](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp).
-6. **Interface (WebUI)**: HTML/JS/CSS em [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/).
+2. **Abstração (HAL)**: Leitura de barramento I2C, conversões analógicas, calibrações de sensores em [hardware_hal.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/hardware_hal.cpp).
+3. **Controle/Matemática**: Lógica do sweep e motores em [mosfet_controller.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/mosfet_controller.cpp) e [math_engine.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/math_engine.cpp).
+4. **Sistema/Orquestração**: FreeRTOS, FFat, Wi-Fi e logs em [main.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/main.cpp).
+5. **API REST / Serviços**: Endpoints HTTP em [web_ui.cpp](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web_ui.cpp).
+6. **Interface (WebUI)**: HTML/JS/CSS em [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/).
 
 ### 1.2 Debug e Logging (Não Negociável)
 * **Backend C++ (ESP32)**: Use a classe `AsyncLogger` com os níveis: `DEBUG`, `INFO`, `WARNING` e `ERROR`. O volume de logs serial é controlado dinamicamente pelo estado do pino físico **GPIO12** (GND = Modo debug ativo; flutuante = produção).
@@ -34,13 +34,16 @@ Qualquer alteração em funcionalidade ou requisito deve propagar rigorosamente 
   * O servidor web deve ser assíncrono e não-bloqueante (`ESPAsyncWebServer`), rodando fixado no Core 0 do ESP32.
   * Todas as operações I2C concorrentes devem ser protegidas pelo semáforo Mutex (`HardwareHAL::getI2CMutex()`).
 * **JavaScript (Frontend)**:
-  * O frontend reside em [src/web/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) e está modularizado em quatro scripts: `core.js` (logs/toasts), `collection.js` (coleta/polling), `visualization.js` (Plotly/Math/CSV) e `email.js` (SMTP).
+  * O frontend reside em [src/web/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/web/) e está modularizado em quatro scripts: `core.js` (logs/toasts), `collection.js` (coleta/polling), `visualization.js` (Plotly/Math/CSV) e `email.js` (SMTP).
   * Lógica de manipulação de DOM deve sempre rodar dentro de listeners do evento `DOMContentLoaded`.
   * Toda ação assíncrona ou de erro deve fornecer toast feedback ao usuário via `showToast(msg, type)`.
 
 ### 1.4 Ciclo de Build e Versionamento
-* **Injeção de Assets Web**: Arquivos HTML/CSS/JS são minificados e transformados em byte arrays estáticos de Flash pelo script de pre-build [scripts/embed_web.py](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py), gerando o arquivo header `src/generated/web_dashboard.h`. Não use SPIFFS/LittleFS para armazenar a UI principal.
-* **Versionamento Semântico**: Mantido em [include/version.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h) no formato `MAJOR.MINOR.SNAPSHOT`. Incremente `SNAPSHOT` a cada alteração lógica.
+* **Injeção de Assets Web**: Arquivos HTML/CSS/JS são minificados e transformados em byte arrays estáticos de Flash pelo script de pre-build [scripts/embed_web.py](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/embed_web.py), gerando o arquivo header `src/generated/web_dashboard.h`. Não use SPIFFS/LittleFS para armazenar a UI principal.
+* **Versionamento Semântico**: Mantido em [include/version.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h) no formato `MAJOR.MINOR.SNAPSHOT`. Incremente `SNAPSHOT` a cada alteração lógica.
+
+### 1.5 Regras de Edição de Markdown
+* Ao criar links para arquivos em qualquer documentação (`.md`), **NUNCA** utilize o esquema `file://`. Isso quebra o parser e corrompe o arquivo. Utilize sempre o **caminho absoluto direto**, no formato `[nome](/home/path/to/file)`.
 
 ---
 
@@ -67,5 +70,5 @@ Qualquer alteração em funcionalidade ou requisito deve propagar rigorosamente 
 ## 4. Regras e Diagnósticos Específicos
 
 Consulte os arquivos modulares em `.agents/rules/` para aprofundamento:
-- [rules/development-guidelines.md](file:///home/luska/Documents/projects/esp32_mosfet_analysis/.agents/rules/development-guidelines.md): Diretrizes completas de arquitetura, coding style e pipelines de build.
-- [rules/analog-diagnostics.md](file:///home/luska/Documents/projects/esp32_mosfet_analysis/.agents/rules/analog-diagnostics.md): Dossiê de diagnóstico analógico, mitigação de crosstalk/charge injection e calibração no ADS1115.
+- [rules/development-guidelines.md](/home/luska/Documents/projects/esp32_mosfet_analysis/.agents/rules/development-guidelines.md): Diretrizes completas de arquitetura, coding style e pipelines de build.
+- [rules/analog-diagnostics.md](/home/luska/Documents/projects/esp32_mosfet_analysis/.agents/rules/analog-diagnostics.md): Dossiê de diagnóstico analógico, mitigação de crosstalk/charge injection e calibração no ADS1115.

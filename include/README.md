@@ -27,7 +27,7 @@ Garantir que as especificações analógicas de baixo nível (valores de resisto
 
 ## 4. Dependências Internas e Externas
 * **Dependências Internas**:
-  * [src/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/) (módulo executor que inclui estes arquivos de cabeçalho).
+  * [src/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/) (módulo executor que inclui estes arquivos de cabeçalho).
 * **Dependências Externas**:
   * **Arduino API e ESP32 Core**: Para definições de tipos primitivos e estruturas do microcontrolador (e.g., `GPIO`, `IPAddress`).
   * **Adafruit Drivers**: Estruturas de suporte de biblioteca do ADS1115 e MCP4725.
@@ -35,22 +35,22 @@ Garantir que as especificações analógicas de baixo nível (valores de resisto
 ---
 
 ## 5. Módulos Relacionados
-* [src/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome todas as definições contidas nesta pasta para instanciar objetos e aplicar lógicas de varredura.
-* [scripts/](file:///home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): O script `increment_version.py` lê e atualiza programaticamente o arquivo `version.h` a cada build de produção.
+* [src/](/home/luska/Documents/projects/esp32_mosfet_analysis/src/): Consome todas as definições contidas nesta pasta para instanciar objetos e aplicar lógicas de varredura.
+* [scripts/](/home/luska/Documents/projects/esp32_mosfet_analysis/scripts/): O script `increment_version.py` lê e atualiza programaticamente o arquivo `version.h` a cada build de produção.
 
 ---
 
 ## 6. Arquivos Críticos e Definições de Baixo Nível
 
-1. **[hardware_hal.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/hardware_hal.h)**: Contém o mapeamento de pinagem, limites analógicos de FSR do ADS1115, e a macro inline crítica de conversão de tensão do shunt amplificado:
+1. **[hardware_hal.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/hardware_hal.h)**: Contém o mapeamento de pinagem, limites analógicos de FSR do ADS1115, e a macro inline crítica de conversão de tensão do shunt amplificado:
    ```cpp
    inline float shuntAmplifiedAdcToVoltage(float adcVolts) {
        return (adcVolts / SHUNT_AMP_GAIN) - SHUNT_AMP_OFFSET;
    }
    ```
-2. **[mosfet_controller.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/mosfet_controller.h)**: Define a struct `SweepConfig`, a máquina de estados do controlador (`MOSState`), limites operacionais de varredura (VGS de 0 a 5V) e parâmetros do PID simples (tolerância de erro de convergência de 2 mV).
-3. **[version.h](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h)**: String central que dita a versão do firmware em execução.
-4. **[secrets.h.example](file:///home/luska/Documents/projects/esp32_mosfet_analysis/include/secrets.h.example)**: Molde para o arquivo `secrets.h` (excluído do repositório) que armazena o SSID e a senha do Wi-Fi de bancada, bem como as credenciais de SMTP para e-mail.
+2. **[mosfet_controller.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/mosfet_controller.h)**: Define a struct `SweepConfig`, a máquina de estados do controlador (`MOSState`), limites operacionais de varredura (VGS de 0 a 5V) e parâmetros do PID simples (tolerância de erro de convergência de 2 mV).
+3. **[version.h](/home/luska/Documents/projects/esp32_mosfet_analysis/include/version.h)**: String central que dita a versão do firmware em execução.
+4. **[secrets.h.example](/home/luska/Documents/projects/esp32_mosfet_analysis/include/secrets.h.example)**: Molde para o arquivo `secrets.h` (excluído do repositório) que armazena o SSID e a senha do Wi-Fi de bancada, bem como as credenciais de SMTP para e-mail.
 
 ---
 
