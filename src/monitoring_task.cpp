@@ -2,6 +2,9 @@
 #include "debug_mode.h"
 #include "led_status.h"
 #include "file_manager.h"
+#include "mosfet_controller.h"
+
+extern MOSFETController mosfet_controller;
 
 // FreeRTOS headers
 extern "C"
@@ -18,7 +21,7 @@ namespace monitoring
     namespace
     {
         // Shared data protected by mutex
-        SystemStatus g_status = {0};
+        SystemStatus g_status;
         SemaphoreHandle_t g_mutex = nullptr;
 
         // Update interval
@@ -128,8 +131,17 @@ namespace monitoring
             // Get free heap
             uint32_t heap = ESP.getFreeHeap();
             
-            // Get storage info (v2.0.0)
-            StorageInfo storage = FileManager::getStorageInfo();
+            // Get storage info (v2.0.0) - Skip during measurement to prevent FFat thread-safety panics on Core 0
+            StorageInfo storage;
+            if (xSemaphoreTake(g_mutex, 0) == pdTRUE) {
+                storage.totalBytes = g_status.storage_total;
+                storage.usedBytes = g_status.storage_used;
+                storage.percentUsed = g_status.storage_percent;
+                xSemaphoreGive(g_mutex);
+            }
+            if (!mosfet_controller.isMeasuring()) {
+                storage = FileManager::getStorageInfo();
+            }
             
             // Detect USB Serial connection
             bool usb = detectUSBSerial();

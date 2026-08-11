@@ -105,6 +105,33 @@
                                         style="display: block; margin-top: var(--spacing-sm); text-align: center;">
                                         <span id="sweep-mode-desc">Varia VGS para cada VDS fixo (padrão)</span>
                                     </small>
+
+                                    <!-- Shunt Precision Toggle -->
+                                    <h3
+                                        style="margin-top: var(--spacing-lg); margin-bottom: var(--spacing-md); display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                        Precisão do Shunt
+                                        <span class="tooltip-trigger" tabindex="0">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888"
+                                                stroke-width="2">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                                            </svg>
+                                            <div class="tooltip-content" style="width: 280px; text-align: left;">
+                                                <strong>Amplificação de Corrente</strong><br><br>
+                                                A corrente é calculada com auxílio de um LM358 que amplifica o sinal de
+                                                baixas correntes, melhorando a precisão na região de sublimiar.
+                                            </div>
+                                        </span>
+                                    </h3>
+                                    <div class="sweep-mode-toggle">
+                                        <span class="mode-label mode-active" id="precision-on-label">Com Precisão</span>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="precision-toggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <span class="mode-label mode-dimmed" id="precision-off-label">Sem Precisão</span>
+                                    </div>
                                 </div>
 
                                 <!-- Hardware Mode Toggle (red) -->
@@ -112,8 +139,8 @@
                                     <h3 style="margin-bottom: var(--spacing-md);">Periféricos</h3>
                                     <div class="sweep-mode-toggle">
                                         <span class="mode-label mode-red mode-active" id="hw-ext-label">DAC e
-                                            ADC<br><small style="font-size:11px;font-weight:400;">Externos (MCP4725 +
-                                                ADS1115)</small></span>
+                                            ADC<br><small style="font-size:11px;font-weight:400;">2× MCP4725 (0x60 VGS,
+                                                0x61 VDS) + ADS1115</small></span>
                                         <label class="toggle-switch">
                                             <input type="checkbox" id="hw-mode-toggle">
                                             <span class="toggle-slider toggle-slider-red"></span>
@@ -139,15 +166,15 @@
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label for="vds-start">Tensão Inicial VDS (V)</label>
-                                        <input type="number" id="vds-start" class="input-field" min="0" max="5"
+                                        <input type="number" id="vds-start" class="input-field" min="0" max="5.12"
                                             step="0.01" value="0">
                                         <small class="helper-text">Início do sweep VDS (padrão: 0V)</small>
                                     </div>
 
                                     <div class="form-group">
                                         <label for="vds-end">Tensão Final VDS (V)</label>
-                                        <input type="number" id="vds-end" class="input-field" min="0" max="5"
-                                            step="0.01" value="5.0">
+                                        <input type="number" id="vds-end" class="input-field" min="0" max="5.12"
+                                            step="0.01" value="5.12">
                                         <small class="helper-text">Limite superior VDS (máximo: VDD)</small>
                                     </div>
 
@@ -159,8 +186,9 @@
                                             <option value="0.050">0.050V</option>
                                             <option value="0.100">0.100V (balanceado)</option>
                                             <option value="0.150">0.150V</option>
-                                            <option value="0.200">0.200V (rápido)</option>
-                                            <option value="0.500">0.500V (Super rápido)</option>                                            
+                                            <option value="0.200">0.200V</option>
+                                            <option value="0.250">0.250V (rápido)</option>
+                                            <option value="0.500">0.500V (ultra rápido)</option>
                                         </select>
                                         <small class="helper-text">Incremento de tensão VDS no sweep</small>
                                     </div>
@@ -176,14 +204,14 @@
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label for="vgs-start">Tensão Inicial VGS (V)</label>
-                                        <input type="number" id="vgs-start" class="input-field" min="0" max="5"
+                                        <input type="number" id="vgs-start" class="input-field" min="0" max="5.12"
                                             step="0.01" value="0">
                                         <small class="helper-text">Início do sweep VGS (padrão: 0V)</small>
                                     </div>
 
                                     <div class="form-group">
                                         <label for="vgs-end">Tensão Final VGS (V)</label>
-                                        <input type="number" id="vgs-end" class="input-field" min="0" max="5"
+                                        <input type="number" id="vgs-end" class="input-field" min="0" max="5.12"
                                             step="0.01" value="4.5">
                                         <small class="helper-text">Limite superior VGS (máximo: VDD, típico:
                                             0-5V)</small>
@@ -199,6 +227,7 @@
                                             <option value="0.150">0.150V</option>
                                             <option value="0.200">0.200V</option>
                                             <option value="0.250">0.250V (rápido)</option>
+                                            <option value="0.500">0.500V (ultra rápido)</option>
                                         </select>
                                         <small class="helper-text">Incremento de tensão VGS (recomendado: 0.05V)</small>
                                     </div>
@@ -223,12 +252,24 @@
                                             step="1" value="0">
                                         <small class="helper-text">Espera entre escrita DAC e leitura ADC (rec.:
                                             0–5 ms)</small>
+
+                                        <!-- Tensão de Alimentação MCP4725 moved here -->
+                                        <div id="ext-dac-vref-group" style="margin-top: 14px;">
+                                            <label for="ext-dac-vref">Alimentação de entrada do USB</label>
+                                            <input type="number" id="ext-dac-vref" class="input-field" min="4.0"
+                                                max="5.5" step="0.001" value="5.120">
+                                            <small class="helper-text" id="ext-dac-vref-hint">
+                                                Tensão de alimentação dos componentes (típico: 5.12V da porta USB)
+                                            </small>
+                                        </div>
                                     </div>
 
-                                    <!-- Ganho ADC (slot anteriormente ocupado pelo settling-time) -->
-                                    <div class="form-group">
-                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                            <label for="adc-gain" style="margin: 0;">Ganho ADC (ADS1115)</label>
+                                    <!-- Ganhos ADC Independentes -->
+                                    <div class="form-group"
+                                        style="padding: 10px; background: rgba(0,0,0,0.05); border-radius: 8px; border-left: 3px solid var(--accent-cyan);">
+                                        <div
+                                            style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                                            <label style="margin: 0; font-weight: 500;">Ganhos ADC (ADS1115)</label>
                                             <span class="tooltip-trigger" tabindex="0">
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                                                     stroke="#888" stroke-width="2" stroke-linecap="round"
@@ -237,12 +278,12 @@
                                                     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                                                     <line x1="12" y1="17" x2="12.01" y2="17" />
                                                 </svg>
-                                                <div class="tooltip-content" style="width: 310px;">
+                                                <div class="tooltip-content"
+                                                    style="width: 310px; right: 0; left: auto;">
                                                     <strong>Ganho PGA do ADS1115</strong><br><br>
-                                                    O ganho define a <strong>faixa de tensão</strong> que o ADC consegue
-                                                    ler. Use a fórmula:<br>
-                                                    <code
-                                                        style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;">I<sub>max</sub> = FSR / R<sub>shunt</sub></code><br><br>
+                                                    O ganho define a <strong>faixa de tensão (FSR)</strong> que o ADC
+                                                    consegue
+                                                    ler.<br><br>
                                                     <strong>Opções disponíveis:</strong><br>
                                                     <table
                                                         style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;">
@@ -282,24 +323,61 @@
                                                             <td>~256 mA</td>
                                                         </tr>
                                                     </table>
-                                                    <br>
-                                                    <small>* Valores para R=1 Ω. Calcule sua faixa:<br>
-                                                        <em>I<sub>max</sub> = FSR / R<sub>shunt</sub></em><br>
-                                                        Ex: FSR ±0.256 V, R=1.33 Ω → I<sub>max</sub> ≈ 192 mA</small>
                                                 </div>
                                             </span>
                                         </div>
-                                        <select id="adc-gain" class="select-field">
-                                            <option value="0">×2/3 — ±6.144 V (corrente muito alta)</option>
-                                            <option value="1">×1 — ±4.096 V (corrente alta)</option>
-                                            <option value="2">×2 — ±2.048 V (médio — padrão)</option>
-                                            <option value="4">×4 — ±1.024 V (corrente baixa)</option>
-                                            <option value="8">×8 — ±0.512 V (corrente muito baixa)</option>
-                                            <option value="16" selected>×16 — ±0.256 V (corrente ultra baixa)</option>
-                                        </select>
-                                        <small class="helper-text" id="gain-hint">FSR: ±2.048 V — Res:
-                                            62.5 µV/LSB</small>
+
+                                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                <div
+                                                    style="min-width: 75px; white-space: nowrap; font-size: 13px; font-weight: 500;">
+                                                    Vshunt <span style="color:#aaa;font-size:10px;">(A0)</span></div>
+                                                <select id="adc-gain-vsh" class="select-field" style="flex: 1;">
+                                                    <option value="255" selected>Automático</option>
+                                                    <option value="0">×2/3 (±6.144V)</option>
+                                                    <option value="1">×1 (±4.096V)</option>
+                                                    <option value="2">×2 (±2.048V) - Padrão Fixo</option>
+                                                    <option value="4">×4 (±1.024V)</option>
+                                                    <option value="8">×8 (±0.512V)</option>
+                                                    <option value="16">×16 (±0.256V)</option>
+                                                </select>
+                                            </div>
+
+                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                <div
+                                                    style="min-width: 75px; white-space: nowrap; font-size: 13px; font-weight: 500;">
+                                                    VD <span style="color:#aaa;font-size:10px;">(A1)</span></div>
+                                                <select id="adc-gain-vd" class="select-field" style="flex: 1;">
+                                                    <option value="255" selected>Automático</option>
+                                                    <option value="0">×2/3 (±6.144V) - Ideal Fixo</option>
+                                                    <option value="1">×1 (±4.096V)</option>
+                                                    <option value="2">×2 (±2.048V)</option>
+                                                    <option value="4">×4 (±1.024V)</option>
+                                                    <option value="8">×8 (±0.512V)</option>
+                                                    <option value="16">×16 (±0.256V)</option>
+                                                </select>
+                                            </div>
+
+                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                <div
+                                                    style="min-width: 75px; white-space: nowrap; font-size: 13px; font-weight: 500;">
+                                                    VG <span style="color:#aaa;font-size:10px;">(A2)</span></div>
+                                                <select id="adc-gain-vg" class="select-field" style="flex: 1;">
+                                                    <option value="255" selected>Automático</option>
+                                                    <option value="0">×2/3 (±6.144V) - Ideal Fixo</option>
+                                                    <option value="1">×1 (±4.096V)</option>
+                                                    <option value="2">×2 (±2.048V)</option>
+                                                    <option value="4">×4 (±1.024V)</option>
+                                                    <option value="8">×8 (±0.512V)</option>
+                                                    <option value="16">×16 (±0.256V)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <small class="helper-text" style="display:block; margin-top:8px;">VD/VG
+                                            geralmente exigem ±6.144V. Vshunt exige ganho se a corrente for
+                                            baixa.</small>
                                     </div>
+
 
                                     <!-- Oversampling Toggle -->
                                     <div class="form-group">
@@ -417,6 +495,14 @@
                             <div class="info-row">
                                 <span class="info-label">Memória Livre</span>
                                 <span class="info-value" id="free-heap">-- KB</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Partição FFat</span>
+                                <span class="info-value" id="storage-total">-- KB</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Espaço Livre</span>
+                                <span class="info-value" id="storage-free">-- KB</span>
                             </div>
                         </div>
                     </div>

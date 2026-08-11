@@ -3,6 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <sys/time.h>
 #include <time.h>
 #include "version.h"
@@ -29,15 +30,17 @@ extern "C"
 #include "freertos/semphr.h"
 }
 
+MOSFETController mosfet_controller;
+
 namespace
 {
 constexpr uint8_t LED_PIN = 2;
 
+// Persistent configuration (NVS)
+Preferences prefs;
 
 // ESPAsyncWebServer - Non-blocking!
 AsyncWebServer server(80);
-MOSFETController mosfet_controller;
-
 // ============================================================================
 // CORS Headers Helper (Async version)
 // ============================================================================
@@ -100,7 +103,7 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   String body = String((char*)data).substring(0, len);
   LOG_DEBUG("Request body: %s", body.c_str());
   
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError error = deserializeJson(doc, body);
   
   if (error) {
@@ -120,7 +123,8 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
       tv.tv_sec = ts;
       tv.tv_usec = 0;
       settimeofday(&tv, NULL);
-      LOG_INFO("System time synchronized to: %lu", ts);
+      tzset(); // Apply TZ immediately
+      LOG_INFO("System time synchronized to: %lu (Local: %s)", ts, ctime(&tv.tv_sec));
     }
   }
   
@@ -135,11 +139,26 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   config.filename = String(fname);
   
   config.vds_start = doc["vds_start"] | 0.0f;
-  config.vds_end = doc["vds_end"] | 5.0f;
+  config.vds_end = doc["vds_end"] | 5.12f;
   config.vds_step = doc["vds_step"] | 0.05f;
   
   const char* sweepModeStr = doc["sweep_mode"] | "VGS";
   config.sweep_mode = (strcmp(sweepModeStr, "VDS") == 0) ? SWEEP_VDS : SWEEP_VGS;
+  config.use_vsh_precise = doc["use_vsh_precise"] | true;
+
+  // Ensure V_start <= V_end for both axes
+  if (config.vgs_start > config.vgs_end) {
+    float temp = config.vgs_start;
+    config.vgs_start = config.vgs_end;
+    config.vgs_end = temp;
+    LOG_WARN("VGS range swapped: %.3f to %.3fV", config.vgs_start, config.vgs_end);
+  }
+  if (config.vds_start > config.vds_end) {
+    float temp = config.vds_start;
+    config.vds_start = config.vds_end;
+    config.vds_end = temp;
+    LOG_WARN("VDS range swapped: %.3f to %.3fV", config.vds_start, config.vds_end);
+  }
   
   // Oversampling configuration (1 = disabled, 16 = default)
   uint16_t oversampling = doc["oversampling"] | 16;
@@ -148,31 +167,81 @@ void handleStartMeasurement(AsyncWebServerRequest *request, uint8_t *data, size_
   // ADC instance with halCfg.adc_oversampling, making a prior call redundant.
   LOG_INFO("ADC oversampling set to %d (%s)", oversampling, oversampling > 1 ? "enabled" : "disabled");
 
-  // ADC PGA gain (0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V)
-  uint8_t adcGain = (uint8_t)(doc["adc_gain"] | 2);  // default: GAIN_TWO
-  config.adc_gain = adcGain;
+  // ADC PGA gain (255 = Auto-Ranging)
+  config.adc_gain_vsh = (uint8_t)(doc["adc_gain_vsh"] | 255);  // default: Auto
+  config.adc_gain_vd  = (uint8_t)(doc["adc_gain_vd"]  | 255);  // default: Auto
+  config.adc_gain_vg  = (uint8_t)(doc["adc_gain_vg"]  | 255);  // default: Auto
 
-  // Hardware mode: true = external I2C (MCP4725 VGS + ADS1115), false = internal ESP32
+  // Parse ext_dac_vref from request or fall back to NVS-stored value
+  float extDacVref = doc["ext_dac_vref"] | 5.12f;
+  if (doc.containsKey("ext_dac_vref")) {
+    // Validate range 4.0 - 5.5 V
+    if (extDacVref < 4.0f || extDacVref > 5.5f) {
+      LOG_ERROR("ext_dac_vref %.2f out of range [4.0, 5.5]", extDacVref);
+      AsyncWebServerResponse *response = request->beginResponse(400, "application/json",
+        "{\"error\":\"out_of_range_vref\",\"message\":\"VDD do MCP4725 deve estar entre 4.0V e 5.5V\"}");
+      addCORSHeaders(response);
+      request->send(response);
+      return;
+    }
+    // Persist to NVS
+    prefs.begin("config", false);
+    prefs.putFloat("ext_dac_vref", extDacVref);
+    prefs.end();
+    LOG_INFO("ext_dac_vref = %.3f V saved to NVS", extDacVref);
+  }
+  config.ext_dac_vref = extDacVref;
+
+  // Hardware mode: external = dual MCP4725 (0x61 VDS, 0x60 VGS) + ADS1115; internal = dual ESP32 DAC + internal ADC
   bool useExternal = doc["use_external_hw"] | true;  // default: external
   config.use_external_hw = useExternal;
   hal::HardwareMode targetMode = useExternal ? hal::HardwareMode::HW_EXTERNAL : hal::HardwareMode::HW_INTERNAL;
+
+  // ── Hardware Pre-flight Check (Backend) ──────────────────────────────────
+  if (targetMode == hal::HardwareMode::HW_EXTERNAL) {
+    auto status = hal::HardwareHAL::checkExternalDevices();
+    if (!status.all_ok()) {
+      LOG_ERROR("Cannot start measurement: External hardware missing");
+      String err = "{\"error\":\"hardware_missing\",\"mcp4725_vds\":";
+      err += (status.mcp4725_vds ? "true" : "false");
+      err += ",\"mcp4725_vgs\":";
+      err += (status.mcp4725_vgs ? "true" : "false");
+      err += ",\"ads1115\":";
+      err += (status.ads1115 ? "true" : "false");
+      err += "}";
+      
+      AsyncWebServerResponse *response = request->beginResponse(424, "application/json", err);
+      addCORSHeaders(response);
+      request->send(response);
+      return;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   hal::HalConfig halCfg;
-  halCfg.hardware_mode   = targetMode;
+  halCfg.hardware_mode    = targetMode;
   halCfg.adc_oversampling = oversampling;
+  halCfg.ext_dac_vref     = extDacVref;
+  // Use the USB/External VDD as the software limit for both modes.
+  // Note: Internal ESP32 DACs will still physically clamp at 3.3V.
+  halCfg.max_vgs          = extDacVref;
+  halCfg.max_vds          = extDacVref;
+  
   hal::HardwareHAL::instance().switchMode(targetMode, halCfg);
 
-  // Apply PGA gain to ExternalADC (only relevant in external mode)
-  if (useExternal) {
-      // static_cast is safe: we are inside the useExternal==true branch,
-      // so getShuntADC() is guaranteed to return an ExternalADC instance.
-      // dynamic_cast is not available with -fno-rtti on ESP32.
-      auto* extAdc = static_cast<hal::ExternalADC*>(&hal::HardwareHAL::instance().getShuntADC());
-      if (extAdc) extAdc->setGain(adcGain);
+  // Apply VDD reference to both MCP4725 (when present)
+  {
+    auto& hal = hal::HardwareHAL::instance();
+    if (auto* vdsDac = hal.getExternalVDS()) vdsDac->setExtDacVref(extDacVref);
+    if (auto* vgsDac = hal.getExternalVGS()) vgsDac->setExtDacVref(extDacVref);
   }
-  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + MCP4725 VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32)");
+
+  // Note: PGA gains for ExternalADC are now applied dynamically during the sweep 
+  // via mosfet_controller based on config.adc_gain_vsh, config.adc_gain_vd, and config.adc_gain_vg.
+  LOG_INFO("Hardware mode: %s", useExternal ? "EXTERNAL (MCP4725 VDS@0x61 + VGS@0x60 + ADS1115@0x48)" : "INTERNAL (ESP32 dual DAC + ADC)");
   
   // Validate
-  if (config.vgs_start < 0 || config.vgs_end > 5.0) {
+  if (config.vgs_start < 0 || config.vgs_end > 5.12) {
     AsyncWebServerResponse *response = request->beginResponse(400, "application/json",
       "{\"error\":\"invalid_vgs_range\"}");
     addCORSHeaders(response);
@@ -312,7 +381,9 @@ void handleSystemInfo(AsyncWebServerRequest *request)
   json += "\"usb_connected\":" + String(status.usb_connected ? "true" : "false") + ",";
   json += "\"free_heap\":" + String(status.free_heap) + ",";
   json += "\"debug_mode\":" + String(debug_mode::isEnabled() ? "true" : "false") + ",";
-  json += "\"storage_percent\":" + String((int)(status.storage_percent * 100));
+  json += "\"storage_percent\":" + String((int)(status.storage_percent * 100)) + ",";
+  json += "\"storage_total\":" + String(status.storage_total) + ",";
+  json += "\"storage_used\":" + String(status.storage_used);
   json += "}";
   
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
@@ -610,6 +681,19 @@ void handleEmailStatus(AsyncWebServerRequest *request)
   request->send(response);
 }
 
+void handleGetConfig(AsyncWebServerRequest *request)
+{
+  prefs.begin("config", true); // read-only
+  float vref = prefs.getFloat("ext_dac_vref", 5.12f);
+  prefs.end();
+
+  String json = "{\"ext_dac_vref\":" + String(vref, 3) + "}";
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  addCORSHeaders(response);
+  request->send(response);
+}
+
 void handleNotFound(AsyncWebServerRequest *request)
 {
   LOG_WARN("HTTP 404: %s %s", 
@@ -628,9 +712,26 @@ void setup()
 {
   Serial.begin(115200);
   delay(100);
+
+  // Set timezone for Sao Paulo, Brazil (UTC-3, no DST)
+  setenv("TZ", "<-03>3", 1);
+  tzset();
+
   initAsyncLogging();
   debug_mode::init();
-  
+
+  // Load persisted config from NVS and apply to HAL
+  prefs.begin("config", false); // Open in read-write to ensure namespace exists
+  if (!prefs.isKey("ext_dac_vref")) {
+    prefs.putFloat("ext_dac_vref", 5.12f);
+  }
+  float storedVref = prefs.getFloat("ext_dac_vref", 5.12f);
+  prefs.end();
+  LOG_INFO("NVS: ext_dac_vref loaded = %.3f V", storedVref);
+  // ExternalDAC will be initialized by mosfet_controller.begin() → hal::init();
+  // Vref will be applied after the first switchMode() call.
+  // Store globally so handleStartMeasurement can use it as default.
+
   if (!FileManager::init()) {
     LOG_ERROR("File system initialization failed");
   }
@@ -669,6 +770,7 @@ void setup()
   server.on("/email.js", HTTP_GET, webui::sendEmailJs);
   
   // API endpoints
+  server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/temperature", HTTP_GET, handleTemperature);
   server.on("/api/usb_status", HTTP_GET, handleUSBStatus);

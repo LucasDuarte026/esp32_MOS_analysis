@@ -98,25 +98,22 @@ String LogBuffer::getLogsJSON() const {
     if (!mutex_) return "[]";
     if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) != pdTRUE) return "[]";
 
-    String json = "[";
+    String json;
+    // Pre-reserve memory to avoid heap fragmentation panics (50 logs * ~150 chars = 7.5KB)
+    json.reserve(MAX_LOGS * 150);
+    json = "[";
     
     size_t count = logs_.size();
     for (size_t i = 0; i < count; i++) {
         // Read in chronological order (oldest first)
-        size_t index;
-        if (buffer_full_) {
-            index = (write_index_ + i) % MAX_LOGS;
-        } else {
-            index = i;
-        }
-        
+        size_t index = buffer_full_ ? ((write_index_ + i) % MAX_LOGS) : i;
         const LogEntry& entry = logs_[index];
         
         if (i > 0) json += ",";
         
-        json += "{";
-        json += "\"timestamp\":" + String(entry.timestamp_ms) + ",";
-        json += "\"level\":";
+        json += "{\"timestamp\":";
+        json += String(entry.timestamp_ms);
+        json += ",\"level\":";
         
         switch (entry.level) {
             case LOG_LEVEL_DEBUG: json += "\"debug\""; break;
@@ -126,10 +123,19 @@ String LogBuffer::getLogsJSON() const {
         }
         
         json += ",\"message\":\"";
-        // Escape quotes in message
-        String escaped_msg = entry.message;
-        escaped_msg.replace("\"", "\\\"");
-        json += escaped_msg;
+        
+        // Manual fast escape and append to avoid temporary String reallocations
+        const size_t len = entry.message.length();
+        for (size_t k = 0; k < len; k++) {
+            char c = entry.message[k];
+            if (c == '\"') json += "\\\"";
+            else if (c == '\\') json += "\\\\";
+            else if (c == '\n') json += "\\n";
+            else if (c == '\r') json += "\\r";
+            else if (c == '\t') json += "\\t";
+            else json += c;
+        }
+        
         json += "\"}";
     }
     

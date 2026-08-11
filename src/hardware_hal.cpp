@@ -69,18 +69,36 @@ void InternalADC::begin() {
 }
 
 uint16_t InternalADC::readRaw() {
-    if (!initialized_) { LOG_ERROR("InternalADC GPIO%d not initialized!", pin_); return 0; }
-    return analogRead(pin_);
+    return readRaw(pin_);
+}
+
+uint16_t InternalADC::readRaw(uint8_t channel) {
+    if (!initialized_) { LOG_ERROR("InternalADC not initialized!"); return 0; }
+    if (channel == 0xFF) return 0;
+    if (oversamplingCount_ <= 1) return analogRead(channel);
+    
+    uint32_t sum = 0;
+    for (uint16_t i = 0; i < oversamplingCount_; i++) sum += analogRead(channel);
+    return (uint16_t)(sum / oversamplingCount_);
 }
 
 float InternalADC::readVoltage() {
-    if (!initialized_) { LOG_ERROR("InternalADC GPIO%d not initialized!", pin_); return 0.0f; }
+    return readVoltage(pin_);
+}
+
+float InternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
+    if (!initialized_) { LOG_ERROR("InternalADC not initialized!"); return 0.0f; }
+    if (channel == 0xFF) return 0.0f;
+    
+    if (oversamplingCount_ <= 1) {
+        return (float)analogRead(channel) * (ADC_VREF / (float)(ADC_MAX_VALUE + 1));
+    }
 
     // ── Sample collection ──────────────────────────────────────────────────
     uint16_t samples[256];
     const uint16_t n = oversamplingCount_;
     for (uint16_t i = 0; i < n; i++) {
-        samples[i] = static_cast<uint16_t>(analogRead(pin_));
+        samples[i] = static_cast<uint16_t>(analogRead(channel));
     }
 
     // ── Insertion Sort ─────────────────────────────────────────────────────
@@ -103,6 +121,19 @@ float InternalADC::readVoltage() {
     return (avgRaw / ADC_MAX_VALUE) * ADC_VREF;
 }
 
+float InternalADC::readVoltageFast() {
+    return readVoltageFast(pin_);
+}
+
+float InternalADC::readVoltageFast(uint8_t channel, uint8_t gainOverride) {
+    if (!initialized_) { LOG_ERROR("InternalADC not initialized!"); return 0.0f; }
+    if (channel == 0xFF) return 0.0f;
+    
+    // Fast path: just 2 samples averaged (no sorting, ~micro-seconds)
+    uint32_t sum = analogRead(channel) + analogRead(channel);
+    return ((float)sum / 2.0f) / ADC_MAX_VALUE * ADC_VREF;
+}
+
 void InternalADC::setOversamplingCount(uint16_t count) {
     if (count < 1)   count = 1;
     if (count > 256) count = 256;
@@ -120,7 +151,9 @@ float InternalADC::getEffectiveBits() const {
 // ============================================================================
 
 ExternalDAC::ExternalDAC(uint8_t i2cAddr, float maxVoltage)
-    : i2cAddr_(i2cAddr), maxVoltage_(maxVoltage) {}
+    : i2cAddr_(i2cAddr), maxVoltage_(maxVoltage) {
+    snprintf(name_, sizeof(name_), "MCP4725 0x%02X", i2cAddr);
+}
 
 bool ExternalDAC::begin() {
     if (initialized_) { LOG_WARN("ExternalDAC (0x%02X) already initialized", i2cAddr_); return true; }
@@ -140,116 +173,142 @@ void ExternalDAC::setVoltage(float voltage) {
     if (voltage < 0.0f)       voltage = 0.0f;
     if (voltage > maxVoltage_) voltage = maxVoltage_;
 
-    // Convert voltage → 12-bit DAC code (0–4095)
-    // MCP4725 output = (code / 4096) * VDD
-    currentValue_ = static_cast<uint16_t>((voltage / EXT_DAC_VREF) * EXT_DAC_MAX_VALUE);
-    if (currentValue_ > EXT_DAC_MAX_VALUE) currentValue_ = EXT_DAC_MAX_VALUE;
+    // Convert voltage → 12-bit DAC code using the runtime VDD reference
+    uint32_t value = static_cast<uint32_t>((voltage / extDacVref_) * (EXT_DAC_MAX_VALUE + 1));
+    if (value > EXT_DAC_MAX_VALUE) value = EXT_DAC_MAX_VALUE;
 
-    mcp_.setVoltage(currentValue_, false);  // Write to DAC register, not EEPROM
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(200)) == pdTRUE) {
+        mcp_.setVoltage(static_cast<uint16_t>(value), false);
+        currentValue_ = static_cast<uint16_t>(value);
+        xSemaphoreGive(HardwareHAL::getI2CMutex());
+    }
+}
+
+void ExternalDAC::setExtDacVref(float vref) {
+    constexpr float MIN_VDD = 4.0f;
+    constexpr float MAX_VDD = 5.5f;
+    if (vref < MIN_VDD) { LOG_WARN("ExternalDAC VDD clamped from %.2f to %.2f", vref, MIN_VDD); vref = MIN_VDD; }
+    if (vref > MAX_VDD) { LOG_WARN("ExternalDAC VDD clamped from %.2f to %.2f", vref, MAX_VDD); vref = MAX_VDD; }
+    extDacVref_ = vref;
+    LOG_INFO("ExternalDAC 0x%02X VDD set to %.3f V (%.3f mV/step)",
+             i2cAddr_, extDacVref_, (extDacVref_ / EXT_DAC_MAX_VALUE) * 1000.0f);
 }
 
 void ExternalDAC::shutdown() {
     if (!initialized_) return;
-    mcp_.setVoltage(0, false);
-    currentValue_ = 0;
-}
-
-
-// ============================================================================
-// ExternalDAC2 (MCP4725 @ 0x61) Implementation — VDS DAC
-// ============================================================================
-
-ExternalDAC2::ExternalDAC2(float maxVoltage)
-    : maxVoltage_(maxVoltage) {}
-
-bool ExternalDAC2::begin() {
-    if (initialized_) { LOG_WARN("ExternalDAC2 (0x%02X) already initialized", EXT_DAC_VDS_ADDR); return true; }
-    if (!mcp_.begin(EXT_DAC_VDS_ADDR)) {
-        LOG_ERROR("ExternalDAC2 MCP4725 not found at I2C addr 0x%02X", EXT_DAC_VDS_ADDR);
-        return false;
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(500)) == pdTRUE) {
+        mcp_.setVoltage(0, false);
+        currentValue_ = 0;
+        xSemaphoreGive(HardwareHAL::getI2CMutex());
     }
-    mcp_.setVoltage(0, false);  // Start at 0 V (no EEPROM write)
-    initialized_ = true;
-    LOG_INFO("ExternalDAC2 MCP4725 initialized at 0x%02X (12-bit, %.3f mV/step)",
-             EXT_DAC_VDS_ADDR, getResolution() * 1000.0f);
-    return true;
-}
-
-void ExternalDAC2::setVoltage(float voltage) {
-    if (!initialized_) { LOG_ERROR("ExternalDAC2 0x%02X not initialized!", EXT_DAC_VDS_ADDR); return; }
-    if (voltage < 0.0f)       voltage = 0.0f;
-    if (voltage > maxVoltage_) voltage = maxVoltage_;
-
-    currentValue_ = static_cast<uint16_t>((voltage / EXT_DAC_VREF) * EXT_DAC_MAX_VALUE);
-    if (currentValue_ > EXT_DAC_MAX_VALUE) currentValue_ = EXT_DAC_MAX_VALUE;
-
-    mcp_.setVoltage(currentValue_, false);  // Write to DAC register, not EEPROM
-}
-
-void ExternalDAC2::shutdown() {
-    if (!initialized_) return;
-    mcp_.setVoltage(0, false);
-    currentValue_ = 0;
 }
 
 
-// ============================================================================
-// ExternalADC (ADS1115) Implementation
-// ============================================================================
+
+
+
+static SemaphoreHandle_t g_i2c_mutex = nullptr;
+
+SemaphoreHandle_t HardwareHAL::getI2CMutex() {
+    if (g_i2c_mutex == nullptr) {
+        g_i2c_mutex = xSemaphoreCreateMutex();
+    }
+    return g_i2c_mutex;
+}
 
 ExternalADC::ExternalADC(uint8_t i2cAddr, uint16_t oversamplingCount)
     : i2cAddr_(i2cAddr), oversamplingCount_(oversamplingCount) {
+    snprintf(name_, sizeof(name_), "ADS1115 0x%02X", i2cAddr);
     if (oversamplingCount_ < 1)   oversamplingCount_ = 1;
     if (oversamplingCount_ > 256) oversamplingCount_ = 256;
 }
 
 bool ExternalADC::begin() {
     if (initialized_) { LOG_WARN("ExternalADC (0x%02X) already initialized", i2cAddr_); return true; }
-    if (!ads_.begin(i2cAddr_)) {
+    
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(500)) != pdTRUE) return false;
+    bool success = ads_.begin(i2cAddr_);
+    if (success) {
+        ads_.setGain(GAIN_TWOTHIRDS);
+        ads_.setDataRate(RATE_ADS1115_860SPS);
+    }
+    xSemaphoreGive(HardwareHAL::getI2CMutex());
+
+    if (!success) {
         LOG_ERROR("ExternalADC ADS1115 not found at I2C addr 0x%02X", i2cAddr_);
         return false;
     }
-    // GAIN_SIXTEEN: ±0.256 V FSR → 7.8 µV/LSB
-    // Chosen because V_shunt_max ≈ 26.6 mV (1.33 Ω × 20 mA) fits well within
-    // 256 mV, using GAIN_TWO (2.048 V FSR) wasted ~99% of the ADC range.
-    ads_.setGain(GAIN_SIXTEEN);
-    // 860 SPS: fastest rate → ~1.16 ms/sample (vs 7.8 ms at default 128 SPS)
-    // With 64 oversampling samples: ~74 ms/point (vs ~500 ms at 128 SPS)
-    ads_.setDataRate(RATE_ADS1115_860SPS);
+    fsr_ = 6.144f;
+    currentGainCode_ = 0;
     initialized_ = true;
-    LOG_INFO("ExternalADC ADS1115 initialized at 0x%02X (16-bit, GAIN_SIXTEEN, %d samples, ~%.1f ENOB)",
-             i2cAddr_, oversamplingCount_, getEffectiveBits());
+    LOG_INFO("ExternalADC ADS1115 initialized at 0x%02X (%d samples)", i2cAddr_, oversamplingCount_);
     return true;
 }
 
 uint16_t ExternalADC::readRaw() {
-    if (!initialized_) { LOG_ERROR("ExternalADC 0x%02X not initialized!", i2cAddr_); return 0; }
-    int16_t raw = ads_.readADC_SingleEnded(0);  // Channel A0
+    return readRaw(ADC_SHUNT_NOM_CH); // Default channel A0
+}
+
+uint16_t ExternalADC::readRaw(uint8_t channel) {
+    if (!initialized_) return 0;
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(200)) != pdTRUE) return 0;
+    int16_t raw = ads_.readADC_SingleEnded(channel);
+    xSemaphoreGive(HardwareHAL::getI2CMutex());
     return (raw < 0) ? 0 : static_cast<uint16_t>(raw);
 }
 
 float ExternalADC::readVoltage() {
-    if (!initialized_) { LOG_ERROR("ExternalADC 0x%02X not initialized!", i2cAddr_); return 0.0f; }
+    return readVoltage(ADC_SHUNT_NOM_CH, currentGainCode_);
+}
 
-    // ── Sample collection (same algorithm as InternalADC) ──────────────────
-    // ADS1115 raw: signed 16-bit; clamp negatives to 0 (0 V floor)
+float ExternalADC::readVoltage(uint8_t channel, uint8_t gainOverride) {
+    if (!initialized_) return 0.0f;
+
+    // AUTO (255): run fast auto-range first so lastAutoGain_[ch] + fsr_ match the next conversion.
+    // Oversampled path used to use stale lastAutoGain_ without re-ranging → wrong fsr vs raw counts.
+    uint8_t gCode = gainOverride;
+    if (gCode == 255) {
+        readVoltageFast(channel, 255);
+        gCode = lastAutoGain_[channel];
+    }
+
+    // Protection context: we take the I2C mutex for the entire oversampled sequence
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(1000)) != pdTRUE) {
+        LOG_ERROR("I2C Timeout in readVoltage (Ch%d)", channel);
+        return 0.0f;
+    }
+
+    if (gCode != currentGainCode_) {
+        setGain(gCode, true);
+    }
+
+    // ── Sample collection ──────────────────────────────────────────────────
     uint16_t samples[256];
     const uint16_t n = oversamplingCount_;
+    
+    // Primary conversion to discard if channel/gain changed
+    ads_.readADC_SingleEnded(channel);
+    
     for (uint16_t i = 0; i < n; i++) {
-        int16_t raw = ads_.readADC_SingleEnded(0);
+        int16_t raw = ads_.readADC_SingleEnded(channel);
         samples[i] = (raw < 0) ? 0 : static_cast<uint16_t>(raw);
     }
 
+    // Release I2C as soon as hardware interaction is done
+    xSemaphoreGive(HardwareHAL::getI2CMutex());
+
     // ── Insertion Sort ─────────────────────────────────────────────────────
-    for (uint16_t i = 1; i < n; i++) {
-        uint16_t key = samples[i];
-        int16_t  j   = static_cast<int16_t>(i) - 1;
-        while (j >= 0 && samples[j] > key) { samples[j + 1] = samples[j]; j--; }
-        samples[j + 1] = key;
+    if (n > 1) {
+        for (uint16_t i = 1; i < n; i++) {
+            uint16_t key = samples[i];
+            int16_t  j   = static_cast<int16_t>(i) - 1;
+            while (j >= 0 && samples[j] > key) { samples[j + 1] = samples[j]; j--; }
+            samples[j + 1] = key;
+        }
     }
 
     // ── Trimmed Mean (10% / 10%) ───────────────────────────────────────────
-    const uint16_t trim  = n / 10;
+    const uint16_t trim  = (n > 5) ? (n / 10) : 0;
     const uint16_t start = trim;
     const uint16_t end   = n - trim;
     uint32_t sum = 0; uint16_t count = 0;
@@ -257,7 +316,81 @@ float ExternalADC::readVoltage() {
     if (count == 0) count = 1;
 
     const float avgRaw = static_cast<float>(sum) / count;
-    // voltage = raw * (FSR / 32767) — FSR is set by the active PGA gain
+    float voltage = avgRaw * (fsr_ / static_cast<float>(EXT_ADC_MAX_RAW));
+    
+    if (channel == ADC_SHUNT_NOM_CH && initialized_) {
+        LOG_DEBUG("[ADC_DIAG] Ch%d: raw=%.1f, fsr=%.3fV, gCode=%d, V=%.6f", 
+                  channel, avgRaw, fsr_, currentGainCode_, voltage);
+    }
+    
+    return voltage;
+}
+
+float ExternalADC::readVoltageFast() {
+    return readVoltageFast(ADC_SHUNT_NOM_CH, currentGainCode_);
+}
+
+float ExternalADC::readVoltageFast(uint8_t channel, uint8_t gainOverride) {
+    if (!initialized_) return 0.0f;
+
+    if (xSemaphoreTake(HardwareHAL::getI2CMutex(), pdMS_TO_TICKS(500)) != pdTRUE) return 0.0f;
+
+    bool autoRange = (gainOverride == 255);
+    uint8_t gCode = autoRange ? lastAutoGain_[channel] : gainOverride;
+
+    if (gCode != currentGainCode_) {
+        setGain(gCode, true);
+    }
+
+    // Prime conversion
+    ads_.readADC_SingleEnded(channel);
+    int16_t r1 = ads_.readADC_SingleEnded(channel);
+
+    // Auto-Ranging Logic
+    if (autoRange) {
+        bool changed = false;
+        while ((r1 > 31000 || r1 < -31000) && gCode > 0) {
+            if (gCode == 16) gCode = 8;
+            else if (gCode == 8) gCode = 4;
+            else if (gCode == 4) gCode = 2;
+            else if (gCode == 2) gCode = 1;
+            else if (gCode == 1) gCode = 0;
+            
+            setGain(gCode, true);
+            ads_.readADC_SingleEnded(channel); // Dummy
+            r1 = ads_.readADC_SingleEnded(channel);
+            changed = true;
+        }
+        
+        while (abs(r1) < 14000 && gCode < 16 && !changed) {
+            uint8_t next_g = gCode;
+            float ratio = 2.0f;
+            if (gCode == 0)      { next_g = 1; ratio = 1.5f; }
+            else if (gCode == 1) { next_g = 2; }
+            else if (gCode == 2) { next_g = 4; }
+            else if (gCode == 4) { next_g = 8; }
+            else if (gCode == 8) { next_g = 16; }
+            
+            if (abs(r1) * ratio > 30000) break;
+            
+            gCode = next_g;
+            setGain(gCode, true);
+            ads_.readADC_SingleEnded(channel); // Dummy
+            r1 = ads_.readADC_SingleEnded(channel);
+            changed = true;
+        }
+        
+        lastAutoGain_[channel] = gCode;
+        if (changed) {
+            LOG_INFO("[AUTO-GAIN] Ch%d: code %d (FSR=%+.3fV)", channel, gCode, fsr_);
+        }
+    }
+
+    int16_t r2 = ads_.readADC_SingleEnded(channel);
+    xSemaphoreGive(HardwareHAL::getI2CMutex());
+
+    uint32_t sum = ((r1 < 0) ? 0 : r1) + ((r2 < 0) ? 0 : r2);
+    float avgRaw = static_cast<float>(sum) / 2.0f;
     return avgRaw * (fsr_ / static_cast<float>(EXT_ADC_MAX_RAW));
 }
 
@@ -273,7 +406,7 @@ float ExternalADC::getEffectiveBits() const {
     return EXT_ADC_BITS + (log2f(oversamplingCount_) / 2.0f);
 }
 
-void ExternalADC::setGain(uint8_t gainCode) {
+void ExternalADC::setGain(uint8_t gainCode, bool silent) {
     adsGain_t g;
     float fsr;
     switch (gainCode) {
@@ -283,12 +416,19 @@ void ExternalADC::setGain(uint8_t gainCode) {
         case  4: g = GAIN_FOUR;      fsr = 1.024f; break;
         case  8: g = GAIN_EIGHT;     fsr = 0.512f; break;
         case 16: g = GAIN_SIXTEEN;   fsr = 0.256f; break;
-        default: g = GAIN_SIXTEEN;   fsr = 0.256f; break;  // safe fallback
+        default:
+            LOG_ERROR("Invalid gain code %d, defaulting to ±0.256V", gainCode);
+            g = GAIN_SIXTEEN; fsr = 0.256f;
+            break;
     }
     ads_.setGain(g);
     fsr_ = fsr;
-    LOG_INFO("ExternalADC gain set: code=%d, FSR=±%.3f V (%.4f mV/LSB)",
-             gainCode, fsr, (fsr / EXT_ADC_MAX_RAW) * 1000.0f);
+    currentGainCode_ = gainCode;
+    
+    if (!silent) {
+        LOG_INFO("ExternalADC gain set: code=%d, FSR=±%.3f V (%.4f mV/LSB)",
+                 gainCode, fsr, (fsr / EXT_ADC_MAX_RAW) * 1000.0f);
+    }
 }
 
 
@@ -348,20 +488,22 @@ void HardwareHAL::switchMode(HardwareMode mode, const HalConfig& config) {
 }
 
 void HardwareHAL::initInternal(const HalConfig& config) {
-    // VDS DAC — InternalDAC channel 1 (GPIO25)
-    auto vds = std::make_unique<InternalDAC>(1, config.max_vds);
+    LOG_INFO("--- HARDWARE DEVICE SELECTION (INTERNAL MODE: dual ESP32 DAC + internal ADC) ---");
+    // VDS — InternalDAC channel 1 (GPIO25)
+    auto vds = std::unique_ptr<InternalDAC>(new InternalDAC(1, config.max_vds));
     vds->begin();
     dacVDS_ = std::move(vds);
 
-    // VGS DAC — InternalDAC channel 2 (GPIO26)
-    auto vgs = std::make_unique<InternalDAC>(2, config.max_vgs);
+    // VGS — InternalDAC channel 2 (GPIO26)
+    auto vgs = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
     vgs->begin();
     dacVGS_ = std::move(vgs);
 
-    // Shunt ADC — InternalADC (GPIO34)
-    auto adc = std::make_unique<InternalADC>(config.adc_shunt_pin, config.adc_oversampling);
+    LOG_INFO("Using InternalADC for Shunt.");
+    auto adc = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
     adc->begin();
     adcShunt_ = std::move(adc);
+    shunt_adc_external_ = false;
 
     LOG_INFO("  [INTERNAL] VDS: InternalDAC GPIO%d (8-bit, %.1f mV/step)",
              DAC_VDS_PIN, dacVDS_->getResolution() * 1000.0f);
@@ -372,43 +514,46 @@ void HardwareHAL::initInternal(const HalConfig& config) {
 }
 
 void HardwareHAL::initExternal(const HalConfig& config) {
-    // VDS DAC — ExternalDAC2 MCP4725 (I2C 0x61, ADDR→VCC) — fully external since v4.2.0
-    auto vds = std::make_unique<ExternalDAC2>(config.max_vds);
+    LOG_INFO("--- HARDWARE DEVICE SELECTION (EXTERNAL MODE: dual MCP4725 + ADS1115) ---");
+
+    // VDS — MCP4725 @ 0x61
+    auto vds = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VDS_ADDR, config.max_vds));
     if (!vds->begin()) {
-        LOG_ERROR("ExternalDAC2 (MCP4725 VDS) init failed — falling back to InternalDAC for VDS");
-        auto vds_fallback = std::make_unique<InternalDAC>(1, config.max_vds);
+        LOG_ERROR("ExternalDAC (MCP4725 VDS 0x61) init failed — falling back to InternalDAC for VDS");
+        auto vds_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(1, config.max_vds));
         vds_fallback->begin();
         dacVDS_ = std::move(vds_fallback);
     } else {
         dacVDS_ = std::move(vds);
     }
 
-    // VGS DAC — ExternalDAC MCP4725 (I2C 0x60, ADDR→GND)
-    auto vgs = std::make_unique<ExternalDAC>(EXT_DAC_VGS_ADDR, config.max_vgs);
+    // VGS — MCP4725 @ 0x60
+    auto vgs = std::unique_ptr<ExternalDAC>(new ExternalDAC(EXT_DAC_VGS_ADDR, config.max_vgs));
     if (!vgs->begin()) {
-        LOG_ERROR("ExternalDAC (MCP4725 VGS) init failed — falling back to InternalDAC for VGS");
-        auto vgs_fallback = std::make_unique<InternalDAC>(2, config.max_vgs);
+        LOG_ERROR("ExternalDAC (MCP4725 VGS 0x60) init failed — falling back to InternalDAC for VGS");
+        auto vgs_fallback = std::unique_ptr<InternalDAC>(new InternalDAC(2, config.max_vgs));
         vgs_fallback->begin();
         dacVGS_ = std::move(vgs_fallback);
     } else {
         dacVGS_ = std::move(vgs);
     }
 
+    LOG_INFO("Using ExternalADC (ADS1115) for Shunt.");
     // Shunt ADC — ExternalADC ADS1115 (I2C 0x48, channel A0)
-    auto adc = std::make_unique<ExternalADC>(EXT_ADC_ADDR, config.adc_oversampling);
+    auto adc = std::unique_ptr<ExternalADC>(new ExternalADC(EXT_ADC_ADDR, config.adc_oversampling));
     if (!adc->begin()) {
         LOG_ERROR("ExternalADC (ADS1115) init failed — falling back to InternalADC");
-        auto adc_fallback = std::make_unique<InternalADC>(config.adc_shunt_pin, config.adc_oversampling);
+        auto adc_fallback = std::unique_ptr<InternalADC>(new InternalADC(config.adc_shunt_pin, config.adc_oversampling));
         adc_fallback->begin();
         adcShunt_ = std::move(adc_fallback);
+        shunt_adc_external_ = false;
     } else {
         adcShunt_ = std::move(adc);
+        shunt_adc_external_ = true;
     }
 
-    LOG_INFO("  [EXTERNAL] VDS: ExternalDAC2 MCP4725 0x%02X (12-bit, %.3f mV/step)",
-             EXT_DAC_VDS_ADDR, dacVDS_->getResolution() * 1000.0f);
-    LOG_INFO("  [EXTERNAL] VGS: ExternalDAC  MCP4725 0x%02X (12-bit, %.3f mV/step)",
-             EXT_DAC_VGS_ADDR, dacVGS_->getResolution() * 1000.0f);
+    LOG_INFO("  [EXTERNAL] VDS: %s", dacVDS_->getName());
+    LOG_INFO("  [EXTERNAL] VGS: %s", dacVGS_->getName());
     LOG_INFO("  [EXTERNAL] ADC: ExternalADC  ADS1115 0x%02X (16-bit, %d samples, ~%.1f ENOB)",
              EXT_ADC_ADDR, config.adc_oversampling, adcShunt_->getEffectiveBits());
 }
@@ -435,14 +580,179 @@ static bool probeI2CDevice(uint8_t addr) {
 }
 
 HardwareHAL::ExternalDeviceStatus HardwareHAL::checkExternalDevices() {
-    // Ensure Wire is started (may already be running; calling begin() again is safe)
-    Wire.begin();
-
     ExternalDeviceStatus status;
-    status.mcp4725_vds = probeI2CDevice(EXT_DAC_VDS_ADDR);  // 0x61
-    status.mcp4725_vgs = probeI2CDevice(EXT_DAC_VGS_ADDR);  // 0x60
-    status.ads1115     = probeI2CDevice(EXT_ADC_ADDR);       // 0x48
+    
+    if (xSemaphoreTake(getI2CMutex(), pdMS_TO_TICKS(200)) == pdTRUE) {
+        status.mcp4725_vds = probeI2CDevice(EXT_DAC_VDS_ADDR);  // 0x61
+        status.mcp4725_vgs = probeI2CDevice(EXT_DAC_VGS_ADDR);  // 0x60
+        status.ads1115     = probeI2CDevice(EXT_ADC_ADDR);     // 0x48
+        xSemaphoreGive(getI2CMutex());
+    } else {
+        status.mcp4725_vds = false;
+        status.mcp4725_vgs = false;
+        status.ads1115 = false;
+    }
     return status;
+}
+
+String HardwareHAL::getHardwareSummary() const {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "Hardware: %s (VDS: %s, VGS: %s, ADC: %s)",
+             (currentMode_ == HardwareMode::HW_EXTERNAL) ? "External Path" : "Internal Path",
+             dacVDS_ ? dacVDS_->getName() : "None",
+             dacVGS_ ? dacVGS_->getName() : "None",
+             adcShunt_ ? adcShunt_->getName() : "None");
+    return String(buf);
+}
+
+float HardwareHAL::readShuntVoltage(uint8_t gainCode) {
+    return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode); // A0 mapped to Shunt
+}
+
+float HardwareHAL::readVD_Actual(uint8_t gainCode) {
+    // Assuming external routing via ADS1115 for VDS at A1
+    return adcShunt_->readVoltage(ADC_VD_ACTUAL_CH, gainCode); 
+}
+
+float HardwareHAL::readVG_Actual(uint8_t gainCode) {
+    // Assuming external routing via ADS1115 for VGS at A2
+    return adcShunt_->readVoltage(ADC_VG_ACTUAL_CH, gainCode);
+}
+
+float HardwareHAL::readShuntVoltageFast(uint8_t gainCode) {
+    return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode); // Channel 0
+}
+
+float HardwareHAL::readShuntVoltageAMPFast(uint8_t gainCode) {
+    float rawVoltage = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+    return shuntAmplifiedAdcToVoltage(rawVoltage);
+}
+
+float HardwareHAL::readShuntVoltageAMPRawFast(uint8_t gainCode) {
+    return adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, gainCode);
+}
+
+float HardwareHAL::readShuntVoltageEffectiveForIds(uint8_t gainCode, bool usePrecise) {
+    if (!shunt_adc_external_) {
+        return readShuntVoltage(gainCode);
+    }
+    if (usePrecise) {
+        // A3 fast (PGA auto for ch3), then A0 oversampled only if A3 saturated
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
+        if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+        }
+        return shuntAmplifiedAdcToVoltage(raw_a3);
+    } else {
+        return adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+    }
+}
+
+float HardwareHAL::readShuntVoltageEffectiveForIdsFast(uint8_t gainCode, bool usePrecise) {
+    if (!shunt_adc_external_) {
+        return readShuntVoltageFast(gainCode);
+    }
+    if (usePrecise) {
+        // A3 first (fast + PGA for ch3); then A0 if amplifier saturated
+        float raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
+        if (raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
+        }
+        return shuntAmplifiedAdcToVoltage(raw_a3);
+    } else {
+        return adcShunt_->readVoltageFast(ADC_SHUNT_NOM_CH, gainCode);
+    }
+}
+
+ShuntSample HardwareHAL::measureShuntSample(uint8_t gainCode, bool usePrecise) {
+    ShuntSample s;
+    if (!shunt_adc_external_) {
+        s.vsh_a0 = readShuntVoltage(gainCode);
+        s.raw_a3 = 0.f;
+        s.vsh_precise = s.vsh_a0;
+        s.vsh_for_ids = s.vsh_a0;
+        return s;
+    }
+
+    // ── [TEST: GND-BOUNCE CORRECTION via A3 as GND reference] ──────────────
+    // PURPOSE: A3 is normally used as the amplified shunt channel (vsh_precise).
+    //          In this test, we ALSO read A3 with auto-gain BEFORE amplification
+    //          context, treating its raw voltage as the GND potential at the
+    //          shunt node. This offset is subtracted from vsh_a0 (the A0 reading)
+    //          to cancel the IR drop along the GND bus.
+    //
+    // ROLLBACK: Set ENABLE_GND_BOUNCE_CORRECTION_TEST to false (line below).
+    //           This restores the original behaviour without any other changes.
+    //
+    // NOTE: A3 role for vsh_precise is UNCHANGED — it still runs auto-gain
+    //       through readVoltageFast(ADC_SHUNT_AMP_CH, 255) below, which uses
+    //       the ADS1115 PGA auto-range for that channel.
+    // ────────────────────────────────────────────────────────────────────────
+    constexpr bool ENABLE_GND_BOUNCE_CORRECTION_TEST = false; // [TEST FLAG] DISABLED: A3 measures LM358 output, not GND potential. See baseline test in mosfet_controller.cpp instead.
+
+    float gnd_offset_V = 0.f;
+    if (ENABLE_GND_BOUNCE_CORRECTION_TEST) {
+        // Read A3 with auto-gain (255) as a raw GND reference voltage.
+        // The gain is tracked per-channel by lastAutoGain_, so it does not
+        // disturb the subsequent amplified read.
+        gnd_offset_V = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
+        LOG_INFO("[GND-TEST] A3 raw (GND offset)=%.4f V", gnd_offset_V); // [TEST LOG]
+    }
+    // ── [END TEST BLOCK] ───────────────────────────────────────────────────
+
+    // A3 then A0: each read uses its own lastAutoGain_[ch] when gainCode == ADC_GAIN_AUTO
+    // A3 ALWAYS uses auto-gain (255) for maximum precision
+    s.raw_a3 = adcShunt_->readVoltageFast(ADC_SHUNT_AMP_CH, 255);
+    s.vsh_precise = shuntAmplifiedAdcToVoltage(s.raw_a3);
+    s.vsh_a0 = adcShunt_->readVoltage(ADC_SHUNT_NOM_CH, gainCode);
+
+    // ── [TEST: Apply GND offset correction to vsh_a0] ──────────────────────
+    // TO ROLLBACK: Set ENABLE_GND_BOUNCE_CORRECTION_TEST = false above.
+    if (ENABLE_GND_BOUNCE_CORRECTION_TEST && gnd_offset_V > 0.f) {
+        float corrected_vsh_a0 = s.vsh_a0 - gnd_offset_V;
+        LOG_INFO("[GND-TEST] vsh_a0 raw=%.4f V | gnd_offset=%.4f V | corrected=%.4f V",
+                  s.vsh_a0, gnd_offset_V, corrected_vsh_a0); // [TEST LOG]
+        s.vsh_a0 = (corrected_vsh_a0 > 0.f) ? corrected_vsh_a0 : 0.f;
+    }
+    // ── [END TEST BLOCK] ───────────────────────────────────────────────────
+
+    if (usePrecise) {
+        // High-end: If LM358 is saturated, use Direct A0
+        if (s.raw_a3 >= VSH_A3_IDS_SWITCH_THRESHOLD_V) {
+            s.vsh_for_ids = s.vsh_a0;
+        } 
+        // Standard Operation: Use Precision channel exclusively (trust the noise floor)
+        else {
+            s.vsh_for_ids = s.vsh_precise;
+        }
+    } else {
+        s.vsh_for_ids = s.vsh_a0;
+    }
+    return s;
+}
+
+float HardwareHAL::readVD_ActualFast(uint8_t gainCode) {
+    return adcShunt_->readVoltageFast(ADC_VD_ACTUAL_CH, gainCode);
+}
+
+float HardwareHAL::readVG_ActualFast(uint8_t gainCode) {
+    return adcShunt_->readVoltageFast(ADC_VG_ACTUAL_CH, gainCode);
+}
+
+ExternalDAC* HardwareHAL::getExternalVDS() {
+    if (currentMode_ != HardwareMode::HW_EXTERNAL || !dacVDS_) return nullptr;
+    if (dacVDS_->getBits() == EXT_DAC_BITS) return static_cast<ExternalDAC*>(dacVDS_.get());
+    return nullptr;
+}
+
+ExternalDAC* HardwareHAL::getExternalVGS() {
+    if (currentMode_ != HardwareMode::HW_EXTERNAL || !dacVGS_) return nullptr;
+    if (dacVGS_->getBits() == EXT_DAC_BITS) return static_cast<ExternalDAC*>(dacVGS_.get());
+    return nullptr;
+}
+
+void HardwareHAL::setADC_Gain(uint8_t gainCode) {
+    adcShunt_->setGain(gainCode);
 }
 
 // ============================================================================
@@ -452,7 +762,18 @@ HardwareHAL::ExternalDeviceStatus HardwareHAL::checkExternalDevices() {
 void init()                   { HardwareHAL::instance().begin(); }
 void setVDS(float voltage)    { HardwareHAL::instance().getVDS().setVoltage(voltage); }
 void setVGS(float voltage)    { HardwareHAL::instance().getVGS().setVoltage(voltage); }
-float readShuntVoltage()      { return HardwareHAL::instance().getShuntADC().readVoltage(); }
+float readShuntVoltage(uint8_t gainCode)      { return HardwareHAL::instance().readShuntVoltage(gainCode); }
+float readVD_Actual(uint8_t gainCode)         { return HardwareHAL::instance().readVD_Actual(gainCode); }
+float readVG_Actual(uint8_t gainCode)         { return HardwareHAL::instance().readVG_Actual(gainCode); }
+float readShuntVoltageFast(uint8_t gainCode)  { return HardwareHAL::instance().readShuntVoltageFast(gainCode); }
+float readShuntVoltageAMPFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPFast(gainCode); }
+float readShuntVoltageAMPRawFast(uint8_t gainCode) { return HardwareHAL::instance().readShuntVoltageAMPRawFast(gainCode); }
+float readShuntVoltageEffectiveForIds(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().readShuntVoltageEffectiveForIds(gainCode, usePrecise); }
+float readShuntVoltageEffectiveForIdsFast(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().readShuntVoltageEffectiveForIdsFast(gainCode, usePrecise); }
+ShuntSample measureShuntSample(uint8_t gainCode, bool usePrecise) { return HardwareHAL::instance().measureShuntSample(gainCode, usePrecise); }
+float readVD_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVD_ActualFast(gainCode); }
+float readVG_ActualFast(uint8_t gainCode)     { return HardwareHAL::instance().readVG_ActualFast(gainCode); }
+void setADC_Gain(uint8_t g)   { HardwareHAL::instance().setADC_Gain(g); }
 void shutdown()               { HardwareHAL::instance().shutdown(); }
 
 } // namespace hal

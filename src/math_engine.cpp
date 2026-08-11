@@ -238,8 +238,13 @@ SSResult calculateSS(
 
     const size_t n = ids.size();
 
-    // ── Step 1: build log10(Ids) array; mark invalid points ────────────────
-    const float IDS_FLOOR = 1e-13f;   // below this = noise, skip
+    // ── Step 1: build log10(Ids) array; mark valid subthreshold points ─────
+    // Only consider points where |Ids| is in the subthreshold band [1e-8, 1e-4] A.
+    // The 1k shunt allows clean readings down to ~10nA, where the true exponential
+    // region lies before moving into moderate inversion near 1µA.
+    const float IDS_FLOOR    = 5e-10f;  // absolute minimum to take log
+    const float IDS_SUB_LOW  = 1e-8f;   // lower bound of subthreshold band (10 nA)
+    const float IDS_SUB_HIGH = 1e-4f;   // upper bound of subthreshold band (100 µA)
 
     std::vector<float> logIds(n, 0.0f);
     std::vector<bool>  usable(n, false);
@@ -251,7 +256,8 @@ SSResult calculateSS(
         float val = fabsf(idsSmooth[i]);
         if (val > IDS_FLOOR) {
             logIds[i] = log10f(val);
-            usable[i] = true;
+            // Mark usable only if within subthreshold current band
+            usable[i] = (val >= IDS_SUB_LOW && val <= IDS_SUB_HIGH);
         }
     }
 
@@ -266,9 +272,7 @@ SSResult calculateSS(
     size_t bestWinStart = 0;
     size_t bestWinEnd   = 0;
 
-    // Pre-allocate reusable buffers OUTSIDE the loop to avoid ~100K heap
-    // alloc/free cycles per measurement curve (which caused heap fragmentation
-    // and a crash in the file download handler after measurement).
+    // Pre-allocate reusable buffers OUTSIDE the loop to avoid heap fragmentation
     std::vector<float> wx, wy;
     wx.reserve(MAX_WIN);
     wy.reserve(MAX_WIN);
@@ -294,7 +298,6 @@ SSResult calculateSS(
             if (wy.back() <= wy.front()) continue;
 
             // Filter 2: require at least 0.5 decades of variation across the window.
-            // Windows with ΔlogIds < 0.5 dec are flat → ADC noise, not subthreshold.
             const float MIN_DELTA_DECADES = 0.5f;
             if ((wy.back() - wy.front()) < MIN_DELTA_DECADES) continue;
 
@@ -302,11 +305,13 @@ SSResult calculateSS(
             float r2 = linearRegression(wx, wy, slope, intercept);
 
             // Filter 3: slope must be ≥ 1 dec/V → SS ≤ 1000 mV/dec.
-            // Shallower slopes are fitting thermal noise in saturation, not subthreshold.
             const float MIN_SLOPE_DEC_PER_V = 1.0f;
             if (slope < MIN_SLOPE_DEC_PER_V) continue;
 
-            if (r2 > bestR2) {
+            // Optimization target: the true subthreshold region is the STEEPEST exponential slope
+            // before strong inversion. Ohmic leakage often has a smoother but gentler slope.
+            // So we select the maximum slope that possesses a valid linear R² (>= 0.85).
+            if (r2 >= 0.85f && slope > bestSlope) {
                 bestR2        = r2;
                 bestSlope     = slope;
                 bestIntercept = intercept;
@@ -317,14 +322,11 @@ SSResult calculateSS(
     }
 
     // ── Step 3: validate and produce result ────────────────────────────────
-    // Accept R² ≥ 0.85 (relaxed from 0.9 to handle noisy/short regions)
-    const float MIN_R2 = 0.85f;
 
-    if (bestR2 >= MIN_R2 && bestSlope > 1e-9f) {
+    if (bestR2 >= 0.85f && bestSlope > 1e-9f) {
         float ss_val = (1.0f / bestSlope) * 1000.0f;  // mV/dec
 
         // Physically plausible range: 60 mV/dec (ideal) … 1000 mV/dec
-        // (values above 1000 indicate noise fitting, not real subthreshold)
         if (ss_val >= 60.0f && ss_val <= 1000.0f) {
             result.ss_mVdec   = ss_val;
             result.valid      = true;
@@ -341,5 +343,6 @@ SSResult calculateSS(
 
     return result;
 }
+
 
 } // namespace math_engine

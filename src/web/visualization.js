@@ -119,7 +119,43 @@ async function handleFileSelection(e) {
         const response = await fetch(`/api/files/download?file=${encodeURIComponent(selectedFile)}&t=${Date.now()}`);
         if (!response.ok) throw new Error('Falha ao baixar arquivo');
 
-        const csvText = await response.text();
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length');
+        let receivedLength = 0;
+        let chunks = [];
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            receivedLength += value.length;
+
+            if (vdsSelect) {
+                if (contentLength) {
+                    const percent = ((receivedLength / contentLength) * 100).toFixed(0);
+                    vdsSelect.innerHTML = `<option value="">⏳ Baixando: ${percent}%</option>`;
+                } else {
+                    const kb = (receivedLength / 1024).toFixed(1);
+                    vdsSelect.innerHTML = `<option value="">⏳ Baixando... ${kb} KB</option>`;
+                }
+            }
+        }
+
+        if (vdsSelect) {
+            vdsSelect.innerHTML = '<option value="">⏳ Processando dados...</option>';
+        }
+
+        // Give UI a moment to paint the processing message
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        let chunksAll = new Uint8Array(receivedLength);
+        let position = 0;
+        for (let chunk of chunks) {
+            chunksAll.set(chunk, position);
+            position += chunk.length;
+        }
+
+        const csvText = new TextDecoder("utf-8").decode(chunksAll);
         dbg('API', `File content received (${csvText.length} bytes)`);
 
         parseCSV(csvText);
@@ -242,14 +278,27 @@ function parseCSV(csvText) {
     uniqueVDSValues = [];
     const lines = csvText.trim().split('\n');
     let dataStartIndex = -1;
+    let rShunt = 100.0; // Default fallback
     const analysisMap = {};
+
+    let colMap = {
+        timestamp: 0, vd: 1, vg: 2, vds_sent: 1, vgs_sent: 2, vds: 1, vgs: 2,
+        vd_read: 3, vg_read: 4, vsh: 5, vsh_precise: 6, vds_true: 7, vgs_true: 8, ids: 9
+    };
 
     // 1. Header & Metadata Scan
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        if (line.includes('timestamp,vds') || line.includes('time,vds')) {
+        // Detect data header row and build column map
+        if (line.includes('timestamp,') || line.includes('time,vds')) {
             dataStartIndex = i + 1;
+            const headers = line.split(',');
+            headers.forEach((h, idx) => {
+                const clean = h.trim().toLowerCase();
+                colMap[clean] = idx;
+            });
+            dbg('CSV', `Detected headers: ${headers.join('|')}`);
         }
 
         if (line.startsWith('# Sweep Mode:')) {
@@ -257,97 +306,115 @@ function parseCSV(csvText) {
             if (modeMatch) currentSweepMode = modeMatch[1].toUpperCase();
         }
 
+        if (line.startsWith('# RSHUNT=')) {
+            const rMatch = line.match(/# RSHUNT=([\d\.]+)/);
+            if (rMatch) rShunt = parseFloat(rMatch[1]);
+        }
+        // ... rest of metadata scan ...
         if (line.startsWith('# VDS=')) {
-            // Parse Metadata (Vt, SS, Tangents)
             try {
-                const vdsMatch = line.match(/VDS=([\d\.]+)V/);
-                const vtMatch = line.match(/Vt=([\d\.]+)V/);
+                const vdsMatch = line.match(/# VDS=([\d\.]+)/);
+                const vtGmMatch = line.match(/Vt_Gm=([\d\.]+)V/);
                 const ssMatch = line.match(/SS=([0-9\.]+)\s?mV\/dec/);
                 const gmMatch = line.match(/MaxGm=([0-9\.eE\-\+]+)\s?S/);
-                const tanVgsMatch = line.match(/SS_Tangent_VGS:([\d\.\-]+),([\d\.\-]+)/);
-                const tanLogMatch = line.match(/SS_Tangent_LogId:([\d\.\-]+),([\d\.\-]+)/);
+                const ssTangentVgsMatch = line.match(/SS_Tangent_VGS:([\d\.\-]+),([\d\.\-]+)/);
+                const ssTangentLogIdMatch = line.match(/SS_Tangent_LogId:([\d\.\-]+),([\d\.\-]+)/);
 
                 if (vdsMatch) {
                     const vdsVal = parseFloat(vdsMatch[1]);
                     const vdsKey = Math.round(vdsVal * 1000) / 1000;
 
-                    const meta = {
-                        vt: vtMatch ? parseFloat(vtMatch[1]) : 0,
-                        ss: ssMatch ? parseFloat(ssMatch[1]) : 0,
-                        max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0
-                    };
-
-                    if (tanVgsMatch && tanLogMatch) {
-                        meta.ssTangent = {
-                            x1: parseFloat(tanVgsMatch[1]),
-                            x2: parseFloat(tanVgsMatch[2]),
-                            y1: parseFloat(tanLogMatch[1]),
-                            y2: parseFloat(tanLogMatch[2])
+                    let ssTangent = null;
+                    if (ssTangentVgsMatch && ssTangentLogIdMatch) {
+                        ssTangent = {
+                            x1: parseFloat(ssTangentVgsMatch[1]),
+                            x2: parseFloat(ssTangentVgsMatch[2]),
+                            y1: parseFloat(ssTangentLogIdMatch[1]),
+                            y2: parseFloat(ssTangentLogIdMatch[2])
                         };
                     }
-                    analysisMap[vdsKey] = meta;
+
+                    analysisMap[vdsKey] = {
+                        vt_gm: vtGmMatch ? parseFloat(vtGmMatch[1]) : 0,
+                        ss: ssMatch ? parseFloat(ssMatch[1]) : 0,
+                        max_gm: gmMatch ? parseFloat(gmMatch[1]) : 0,
+                        ssTangent: ssTangent
+                    };
                 }
-            } catch (e) {
-                console.warn("Metadata parse error:", line);
-            }
+            } catch (e) { }
         }
     }
 
-    // Fallback if no header found
-    if (dataStartIndex === -1) {
-        for (let i = 0; i < lines.length; i++) {
-            if (!lines[i].trim().startsWith('#') && lines[i].includes(',')) {
-                dataStartIndex = i;
-                break;
-            }
-        }
-    }
-    if (dataStartIndex === -1) dataStartIndex = 0;
-
+    // 2. Data Parsing
+    currentCSVData = [];
     const vdsSet = new Set();
     const vgsSet = new Set();
 
-    // 2. Data Parsing
     for (let i = dataStartIndex; i < lines.length; i++) {
-        const parts = lines[i].split(',');
+        const line = lines[i].trim();
+        if (!line || line.startsWith('#')) continue;
+        const parts = line.split(',');
         if (parts.length < 5) continue;
 
-        const vds = parseFloat(parts[1]);
-        const vgs = parseFloat(parts[2]);
-        const vsh = parseFloat(parts[3]);
-        const ids = parseFloat(parts[4]);
-        const gm = parseFloat(parts[5]);
+        let vds, vgs, vsh, vsh_precise, ids, gm = 0, vd_read, vg_read, vds_true, vgs_true;
 
-        // Legacy format fallback
-        let vt = (parts.length > 6) ? parseFloat(parts[6]) : 0;
-        let ss = (parts.length > 7) ? parseFloat(parts[7]) : 0;
+        // Dynamic mapping based on detected indices
+        vds = parseFloat(parts[colMap.vds || colMap.vd || colMap.vds_sent || 1]);
+        vgs = parseFloat(parts[colMap.vgs || colMap.vg || colMap.vgs_sent || 2]);
+        vd_read = parseFloat(parts[colMap.vd_read || 3]);
+        vg_read = parseFloat(parts[colMap.vg_read || 4]);
+        vsh = parseFloat(parts[colMap.vsh || 5]);
+        vsh_precise = parseFloat(parts[colMap.vsh_precise || 6]);
+        vds_true = parseFloat(parts[colMap.vds_true || 7]);
+        vgs_true = parseFloat(parts[colMap.vgs_true || 8]);
+        ids = parseFloat(parts[colMap.ids || 9]);
 
-        if (!isNaN(vds) && !isNaN(vgs)) {
+        // Specific override if vds_true/vgs_true are missing (7-col legacy)
+        if (isNaN(vds_true)) vds_true = vds;
+        if (isNaN(vgs_true)) vgs_true = vgs;
+
+        // Legacy format fallback for Vt/SS (no longer stored per-row in new format)
+        let vt_gm = 0;
+        let ss = 0;
+
+        if (!isNaN(vds_true) && !isNaN(vgs_true)) {
+            const vdsTrueRounded = Math.round(vds_true * 1000) / 1000;
+            const vgsTrueRounded = Math.round(vgs_true * 1000) / 1000;
             const vdsRounded = Math.round(vds * 1000) / 1000;
             const vgsRounded = Math.round(vgs * 1000) / 1000;
+
+            // Curve selector is built from COMMANDED values (the loop targets the user set)
             vdsSet.add(vdsRounded);
             vgsSet.add(vgsRounded);
 
+            // Look up backend-computed metadata by the commanded VDS key
             if (analysisMap[vdsRounded]) {
-                vt = analysisMap[vdsRounded].vt;
+                vt_gm = analysisMap[vdsRounded].vt_gm;
                 ss = analysisMap[vdsRounded].ss;
             }
 
             currentCSVData.push({
-                vds: vdsRounded,
-                vgs: vgsRounded,
-                vsh: vsh,
+                vds: vdsRounded,       // commanded target
+                vgs: vgsRounded,       // commanded target
+                vsh: isNaN(vsh) ? 0 : vsh,
+                vsh_precise: isNaN(vsh_precise) ? (isNaN(vsh) ? 0 : vsh) : vsh_precise,
                 ids: isNaN(ids) ? 0 : ids,
                 gm: isNaN(gm) ? 0 : gm,
-                vt: vt,
+                vd_read: isNaN(vd_read) ? vds : vd_read,
+                vg_read: isNaN(vg_read) ? vgs : vg_read,
+                vds_true: vdsTrueRounded,  // true terminal VDS (for plot x-axis)
+                vgs_true: vgsTrueRounded,  // true terminal VGS (for plot x-axis)
+                r_shunt: rShunt,           // Store for later trace calculation
+                vt_gm: vt_gm,
                 ss: ss,
                 max_gm: analysisMap[vdsRounded] ? analysisMap[vdsRounded].max_gm : 0
             });
         }
     }
 
-    // In VDS sweep mode (IdVd): the curve selector lists unique VGS values (one curve per VGS).
-    // In VGS sweep mode (IdVg): the curve selector lists unique VDS values (one curve per VDS).
+    // Curve selector lists unique COMMANDED voltage values (the loop targets):
+    //   VDS sweep → unique vgs values (one curve per fixed commanded VGS)
+    //   VGS sweep → unique vds values (one curve per fixed commanded VDS)
     if (currentSweepMode === 'VDS') {
         uniqueVDSValues = Array.from(vgsSet).sort((a, b) => a - b);
     } else {
@@ -418,19 +485,23 @@ function calculateGmForData(data, sweepMode) {
     if (!data || data.length < 2) return;
     const curves = {};
     data.forEach(d => {
-        const key = sweepMode === 'VDS' ? d.vgs : d.vds;
+        // Group by the FIXED axis true-voltage
+        const key = sweepMode === 'VDS' ? d.vgs_true : d.vds_true;
         if (!curves[key]) curves[key] = [];
         curves[key].push(d);
     });
 
     Object.keys(curves).forEach(k => {
         const curve = curves[k];
-        curve.sort((a, b) => (sweepMode === 'VDS' ? a.vds - b.vds : a.vgs - b.vgs));
+        curve.sort((a, b) => (sweepMode === 'VDS' ? a.vds_true - b.vds_true : a.vgs_true - b.vgs_true));
 
         for (let i = 1; i < curve.length - 1; i++) {
             const prev = curve[i - 1];
             const next = curve[i + 1];
-            const dx = sweepMode === 'VDS' ? (next.vds - prev.vds) : (next.vgs - prev.vgs);
+            // Use true voltages for dx
+            const dx = sweepMode === 'VDS'
+                ? (next.vds_true - prev.vds_true)
+                : (next.vgs_true - prev.vgs_true);
             const dy = next.ids - prev.ids;
 
             if (Math.abs(dx) > 1e-6) curve[i].gm = dy / dx;
@@ -489,27 +560,29 @@ function updatePlotsMultiCurve() {
 
     const isVDSMode = currentSweepMode === 'VDS';
 
-    // Colors
+    // Colors — primary trace: Ids (cyan)
     const colors = {
-        ids: '#2196F3', gm: '#FF9800', ss: '#F44336', vt: '#4CAF50', tangent: '#E91E63'
+        ids: '#00BCD4',
+        gm: '#FF9800', ss: '#F44336', vt_gm: '#4CAF50', tangent: '#E91E63'
     };
 
     // ── Filter Data ─────────────────────────────────────────────────────────
-    // curveVal is the FIXED axis value used to select one curve:
-    //   VDS mode → curveVal is a VGS value (fixed gate); X axis = VDS
-    //   VGS mode → curveVal is a VDS value (fixed drain); X axis = VGS
+    // curveVal comes from the drop-down which lists COMMANDED voltages.
+    // We filter by the commanded target so the user sees exactly the curves
+    // they configured (e.g. 3.0, 3.1, 3.2, 3.3 V).
+    // X-axis and calculations still use vds_true / vgs_true.
     const curveVal = parseFloat(vdsSelect.value);
     if (isNaN(curveVal)) return;
 
     let plotData;
     if (isVDSMode) {
-        // IdVd: show Ids vs VDS for the selected VGS
+        // IdVd: fixed commanded VGS; X axis = VDS_true
         plotData = currentCSVData.filter(d => Math.abs(d.vgs - curveVal) < 0.0015);
-        plotData.sort((a, b) => a.vds - b.vds);
+        plotData.sort((a, b) => a.vds_true - b.vds_true);
     } else {
-        // IdVg: show Ids vs VGS for the selected VDS
+        // IdVg: fixed commanded VDS; X axis = VGS_true
         plotData = currentCSVData.filter(d => Math.abs(d.vds - curveVal) < 0.0015);
-        plotData.sort((a, b) => a.vgs - b.vgs);
+        plotData.sort((a, b) => a.vgs_true - b.vgs_true);
     }
 
     if (plotData.length === 0) {
@@ -517,10 +590,9 @@ function updatePlotsMultiCurve() {
         return;
     }
 
-    const xData = plotData.map(d => isVDSMode ? d.vds : d.vgs);
+    const xData = plotData.map(d => isVDSMode ? d.vds_true : d.vgs_true);
 
-    // ── Traces ──────────────────────────────────────────────────────────────
-    // 1. Ids trace (always present)
+    // ── Traces — Ids (drain current)
     const traces = [{
         x: xData,
         y: plotData.map(d => Math.abs(d.ids)),
@@ -550,19 +622,22 @@ function updatePlotsMultiCurve() {
         const meta = fileAnalysisMap[vdsKey];
 
         if (meta) {
-            // Vt vertical line
-            if (meta.vt > 0 && visibleCurves.vt) {
-                shapes.push({
-                    type: 'line',
-                    x0: meta.vt, y0: 0, x1: meta.vt, y1: 1,
-                    xref: 'x', yref: 'paper',
-                    line: { color: colors.vt, width: 2, dash: 'dash' }
-                });
-                annotations.push({
-                    x: meta.vt, y: 1, xref: 'x', yref: 'paper',
-                    text: `Vt=${meta.vt.toFixed(2)}V`,
-                    showarrow: false, yanchor: 'bottom', font: { color: colors.vt }
-                });
+            // Vt vertical lines
+            if (visibleCurves.vt) {
+                // Vth Gm
+                if (meta.vt_gm > 0) {
+                    shapes.push({
+                        type: 'line',
+                        x0: meta.vt_gm, y0: 0, x1: meta.vt_gm, y1: 1,
+                        xref: 'x', yref: 'paper',
+                        line: { color: colors.vt_gm, width: 2, dash: 'dash' }
+                    });
+                    annotations.push({
+                        x: meta.vt_gm, y: 1, xref: 'x', yref: 'paper',
+                        text: `Gm: ${meta.vt_gm.toFixed(2)}V`,
+                        showarrow: false, yanchor: 'bottom', font: { color: colors.vt_gm }
+                    });
+                }
             }
 
             // SS tangent (log scale only)
@@ -580,18 +655,18 @@ function updatePlotsMultiCurve() {
 
     // ── Layout ───────────────────────────────────────────────────────────────
     const plotTitle = isVDSMode
-        ? `Curva de Saída — VGS = ${curveVal.toFixed(3)} V`
-        : `Curva de Transferência — VDS = ${curveVal.toFixed(3)} V`;
+        ? `Curva de Saída — VGS_true = ${curveVal.toFixed(3)} V`
+        : `Curva de Transferência — VDS_true = ${curveVal.toFixed(3)} V`;
 
-    const xAxisTitle = isVDSMode ? 'VDS (V)' : 'VGS (V)';
+    const xAxisTitle = isVDSMode ? 'VDS_true (V)' : 'VGS_true (V)';
 
     const layout = {
         title: plotTitle,
         xaxis: { title: xAxisTitle },
         yaxis: {
             title: 'Ids (A)',
-            titlefont: { color: '#2196F3' },
-            tickfont: { color: '#2196F3' },
+            titlefont: { color: '#e0e0e0' },
+            tickfont: { color: '#e0e0e0' },
             type: isVDSMode ? 'linear' : scaleType,  // IdVd always linear
             exponentformat: 'e'
         },
@@ -621,13 +696,13 @@ function updatePlotsMultiCurve() {
 }
 
 function updateMetrics(plotData, meta) {
-    const vtEl = document.getElementById('metric-vt');
+    const vtGmEl = document.getElementById('metric-vt-gm');
     const gmEl = document.getElementById('metric-gm');
     const ssEl = document.getElementById('metric-ss');
 
     if (currentSweepMode === 'VDS') {
-        const msg = "N/A (VDS Mode)";
-        if (vtEl) vtEl.textContent = msg;
+        const msg = "N/A";
+        if (vtGmEl) vtGmEl.textContent = msg;
         if (gmEl) gmEl.textContent = msg;
         if (ssEl) ssEl.textContent = msg;
         return;
@@ -635,7 +710,7 @@ function updateMetrics(plotData, meta) {
 
     // Use metadata if available, else calc
     if (meta) {
-        if (vtEl) vtEl.textContent = meta.vt ? `${meta.vt.toFixed(3)} V` : '-';
+        if (vtGmEl) vtGmEl.textContent = meta.vt_gm ? `${meta.vt_gm.toFixed(3)} V` : '-';
         if (gmEl) gmEl.textContent = meta.max_gm ? `${(meta.max_gm * 1000).toFixed(3)} mS` : '-';
         if (ssEl) ssEl.textContent = meta.ss ? `${meta.ss.toFixed(1)} mV/dec` : '-';
     } else {

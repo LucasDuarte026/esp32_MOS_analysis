@@ -2,7 +2,7 @@
 .vscode
 .venv
 KNOWN_ISSUES.md
-desejos futuros.txt
+desejos futuros.md
 platformio_override.ini
 wifi_credentials_local.h
 include/secrets.h
@@ -13,3 +13,6 @@ test_data/
 include/email_credentials.h
 content_data/
 relatorios
+compile_commands.json
+tests/graph_maker/venv
+tests/graph_maker/*/

@@ -21,6 +21,19 @@
 
 // Pin and HAL definitions live in hardware_hal.h.
 
+// ============================================================================
+// DAC Closed-Loop Calibration Parameters
+// ============================================================================
+/// Maximum allowed VDS read-back error (|VD_read - VSH - target_vds|) before
+/// entering the correction loop [V].
+/// Set to 2 mV — consistent with MCP4725 resolution (1.22 mV/step) and LM358 offset (~58.2 mV post-conversion).
+#define VDS_GLOBAL_ERROR   0.002f
+/// Maximum allowed VGS read-back error. Kept at 2mV — dominated by source
+/// degeneration that varies with Ids, not by DAC/amp resolution.
+#define VGS_GLOBAL_ERROR   0.002f
+/// Maximum correction iterations before giving up and keeping best estimate
+#define DAC_CALIB_MAX_ITER 10
+
 // ----------------------------------------------------------------------------
 // SweepMode — which axis is the inner (fast) loop
 // ----------------------------------------------------------------------------
@@ -34,7 +47,7 @@ enum SweepMode {
 // ----------------------------------------------------------------------------
 struct SweepConfig {
     float vgs_start;            ///< Gate sweep start voltage (V)
-    float vgs_end;              ///< Gate sweep end voltage (V), up to 5.0 V
+    float vgs_end;              ///< Gate sweep end voltage (V), up to 5.12 V
     float vgs_step;             ///< Gate voltage increment per step (V)
     float vds_start;            ///< Drain sweep start voltage (V)
     float vds_end;              ///< Drain sweep end voltage (V)
@@ -42,10 +55,14 @@ struct SweepConfig {
     float rshunt;               ///< Shunt resistor (Ω); Ids = Vsh / Rshunt
     int   settling_ms;          ///< Wait after setting a new voltage before sampling (ms)
     uint16_t oversampling = 16; ///< ADC samples averaged per point (1 = off, 16 = default)
-    uint8_t  adc_gain     = 2;  ///< ADS1115 PGA gain selector: 0=±6.144V 1=±4.096V 2=±2.048V 4=±1.024V 8=±0.512V 16=±0.256V
+    uint8_t  adc_gain_vsh = 255;  ///< 255=AUTO per channel (A0/A3); else fixed PGA for shunt reads
+    uint8_t  adc_gain_vd  = 0;  ///< ADS1115 PGA gain for VD (A1): Usually 0 for ±6.144V
+    uint8_t  adc_gain_vg  = 0;  ///< ADS1115 PGA gain for VG (A2): Usually 0 for ±6.144V
+    float    ext_dac_vref = 5.12f; ///< MCP4725 supply voltage (V), valid range [4.0, 5.5]. Used to scale DAC codes.
     bool use_external_hw  = true; ///< true = MCP4725 + ADS1115; false = internal ESP32 peripherals
     String filename;            ///< Base filename (timestamp will be appended)
     SweepMode sweep_mode = SWEEP_VGS; ///< Which axis drives the inner loop
+    bool use_vsh_precise = true; ///< true = blend A3 (amp) for low Ids; false = A0 only
 };
 
 // ----------------------------------------------------------------------------
@@ -62,6 +79,14 @@ struct DataPoint {
     float gm;   ///< Transconductance: dIds/dVgs at this point (S)
     float vt;   ///< Threshold voltage extrapolated from peak Gm (V)
     float ss;   ///< Subthreshold swing (mV/decade)
+
+    // True readings from multichannel ADC
+    float vd_read;   ///< Actual drain node voltage measured (V)
+    float vg_read;   ///< Actual gate node voltage measured (V)
+
+    // True transistor terminal voltages (accounting for shunt drop)
+    float vds_true;  ///< True VDS = vd_read - vsh_measured (V)
+    float vgs_true;  ///< True VGS = vg_read - vsh_measured (V)
 };
 
 // ============================================================================
@@ -134,6 +159,29 @@ private:
     bool  openMeasurementFile();
     void  closeMeasurementFile();
 
+    /**
+     * @brief Closed-loop VDS calibration.
+     *
+     * Sets VDS DAC to a probe voltage, then reads VD_read and VSH to compute
+     * the actual differential VDS = VD_read - VSH.  If |error| > VDS_GLOBAL_ERROR
+     * the probe is nudged and the loop repeats (max DAC_CALIB_MAX_ITER).
+     * VSH is re-read at every iteration so the correction accounts for
+     * the current-dependent shunt drop.
+     *
+     * @param target_vds  Desired drain-source voltage [V]
+     * @param settling_ms Settling delay after each DAC write [ms]
+     * @return            Best-achieved DAC probe voltage [V]
+     */
+    float calibrateVDS(float target_vds, int settling_ms);
+
+    /**
+     * @brief Closed-loop VGS calibration — same algorithm for the gate rail.
+     *
+     * Computes actual VGS = VG_read - VSH and corrects until
+     * |error| <= VGS_GLOBAL_ERROR.
+     */
+    float calibrateVGS(float target_vgs, int settling_ms);
+
     SweepConfig      config_;
     bool             measuring_  = false;
     bool             cancelled_  = false;
@@ -144,15 +192,20 @@ private:
     // Flushed to disk after calculateCurveParams() and then cleared.
     struct CurveData {
         float vds;      ///< Fixed VDS for this curve (V)
-        float vt;       ///< Threshold voltage (V)
+        float vt_gm;    ///< Threshold voltage via peak-Gm extrapolation (V)
         float ss;       ///< Subthreshold swing (mV/decade)
         float max_gm;   ///< Peak transconductance (S)
         float rshunt;   ///< Rshunt passed in for downstream validity checks
 
-        std::vector<float>    vgs;
+        std::vector<float>    vgs;       ///< Commanded VGS target
         std::vector<float>    ids;
         std::vector<float>    gm;
-        std::vector<float>    vsh;
+        std::vector<float>    vsh;           ///< A0 direct shunt (CSV column; not the blend used for ids)
+        std::vector<float>    vsh_precise;     ///< A3 amplified ÷ gain (CSV column)
+        std::vector<float>    vd_read;
+        std::vector<float>    vg_read;
+        std::vector<float>    vds_true;  ///< True VDS = vd_read - vsh
+        std::vector<float>    vgs_true;  ///< True VGS = vg_read - vsh
         std::vector<uint32_t> timestamps;
 
         // Tangent line endpoints in (VGS, log10(Ids)) space for dashboard overlay

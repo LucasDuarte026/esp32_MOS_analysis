@@ -55,8 +55,8 @@ struct StorageInfo {
 // ============================================================================
 class FileManager {
 public:
-    static const int   MAX_FILES         = 200;   ///< Absolute maximum number of stored CSVs
-    static const int   WARNING_THRESHOLD  = 150;   ///< Warn the user when file count exceeds this
+    static const int   MAX_FILES         = 100;   ///< Absolute maximum number of stored CSVs (sync with 2.4MB partition)
+    static const int   WARNING_THRESHOLD  = 80;    ///< Warn the user when file count exceeds this
     static constexpr float MAX_STORAGE_USAGE = 0.80f; ///< Refuse new saves above 80% partition fill
 
     /** Mount FFat and create the /measurements directory if absent. Call once from setup(). */

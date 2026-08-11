@@ -13,6 +13,8 @@ def get_version_info():
         with open(VERSION_FILE, 'r') as f:
             lines = f.readlines()
             for line in lines:
+                if "//" in line:
+                    line = line.split("//")[0]
                 if "VERSION_MAJOR" in line:
                     major = int(line.split()[-1])
                 elif "VERSION_MINOR" in line:

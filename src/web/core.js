@@ -6,7 +6,7 @@
 // =============================================================================
 // Global Variables & State
 // =============================================================================
-let currentVDD = 5.0; // Default VDD voltage
+let currentVDD = 5.12; // Default VDD voltage
 let usbConnected = false;
 
 // Debug Configuration
@@ -80,6 +80,29 @@ async function updateSystemInfo() {
             freeHeapEl.textContent = `${heapKB} KB`;
         }
 
+        // Update Storage Status (v2.0.0)
+        const storageTotalEl = document.getElementById('storage-total');
+        const storageFreeEl = document.getElementById('storage-free');
+
+        if (data.storage_total !== undefined) {
+            const totalKb = (data.storage_total / 1024).toFixed(0);
+            const freeKb = ((data.storage_total - data.storage_used) / 1024).toFixed(0);
+            
+            if (storageTotalEl) storageTotalEl.textContent = `${totalKb} KB`;
+            if (storageFreeEl) {
+                storageFreeEl.textContent = `${freeKb} KB (${data.storage_percent}%)`;
+                
+                // Colorize based on usage
+                if (data.storage_percent > 80) {
+                    storageFreeEl.style.color = '#F44336'; // Danger
+                } else if (data.storage_percent > 60) {
+                    storageFreeEl.style.color = '#FF9800'; // Warning
+                } else {
+                    storageFreeEl.style.color = '#4CAF50'; // OK
+                }
+            }
+        }
+
         // Update Debug Mode status
         let debugEl = document.getElementById('debug-status');
         if (!debugEl && freeHeapEl) {
@@ -101,7 +124,7 @@ async function updateSystemInfo() {
 
         // Update VDD if USB is connected
         if (data.usb_connected) {
-            currentVDD = 5.0;
+            currentVDD = 5.12;
         }
     } catch (error) {
         // console.error('Error fetching system info:', error); // Suppress frequent errors
@@ -167,7 +190,7 @@ function validateVoltageLimit(inputElement) {
     const value = parseFloat(inputElement.value);
     if (value > currentVDD) {
         alert(`⚠️ Atenção: A tensão máxima é limitada pela alimentação VDD (${currentVDD}V${usbConnected ? ' via USB' : ''})`);
-        inputElement.value = currentVDD.toFixed(1);
+        inputElement.value = currentVDD.toFixed(3);
     }
 }
 
